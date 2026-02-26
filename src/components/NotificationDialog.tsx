@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { requestNotificationPermission, getNotificationPermission } from '../lib/notifications'
+import { usePushNotifications } from '../hooks/usePushNotifications'
 
 type Props = {
   open: boolean
@@ -7,18 +6,7 @@ type Props = {
 }
 
 export function NotificationDialog({ open, onClose }: Props) {
-  const [permission, setPermission] = useState(getNotificationPermission())
-  const [isRequesting, setIsRequesting] = useState(false)
-
-  const handleRequest = async () => {
-    setIsRequesting(true)
-    try {
-      const result = await requestNotificationPermission()
-      setPermission(result)
-    } finally {
-      setIsRequesting(false)
-    }
-  }
+  const { isSupported, isSubscribed, permission, isLoading, subscribe, unsubscribe } = usePushNotifications()
 
   if (!open) return null
 
@@ -42,17 +30,33 @@ export function NotificationDialog({ open, onClose }: Props) {
             permission === 'denied' ? 'text-red-400' :
             'text-yellow-400'
           }>
-            {permission === 'granted' ? 'Enabled' :
-             permission === 'denied' ? 'Blocked' :
-             'Not Set'}
+            {permission === 'granted'
+              ? (isSubscribed ? 'Active' : 'Enabled')
+              : permission === 'denied' ? 'Blocked'
+              : 'Not Set'}
           </span>
         </div>
+
+        {!isSupported && (
+          <p className="text-xs text-red-400">
+            Your browser does not support notifications.
+          </p>
+        )}
 
         {permission === 'denied' && (
           <p className="text-xs text-red-400">
             Notifications are blocked. Please update your browser settings to allow notifications for this site.
           </p>
         )}
+
+        <div className="space-y-2 text-xs text-muted-foreground">
+          <p className="font-medium text-foreground text-sm">Alert types:</p>
+          <ul className="space-y-1 ml-2">
+            <li>🟢🔴 <span className="text-foreground">Momentum</span> — RSI & Stochastic extreme threshold crosses</li>
+            <li>🟡🟣 <span className="text-foreground">MA Cross</span> — EMA 10/50 golden & death crosses</li>
+            <li>⚛ <span className="text-foreground">Quantum Phase</span> — Phase transitions with confidence &gt; 30%</li>
+          </ul>
+        </div>
 
         <p className="text-xs text-muted-foreground">
           Note: Push notification server is not available in this frontend-only build. Browser notifications will work for in-app alerts only.
@@ -65,14 +69,24 @@ export function NotificationDialog({ open, onClose }: Props) {
           >
             Close
           </button>
-          {permission !== 'granted' && permission !== 'denied' && (
-            <button
-              onClick={handleRequest}
-              disabled={isRequesting}
-              className="px-3 py-1.5 text-sm bg-primary/20 text-primary border border-primary/30 rounded hover:bg-primary/30 transition-colors disabled:opacity-50"
-            >
-              {isRequesting ? 'Requesting…' : 'Enable Notifications'}
-            </button>
+          {isSupported && permission !== 'denied' && (
+            isSubscribed || permission === 'granted' ? (
+              <button
+                onClick={unsubscribe}
+                disabled={isLoading}
+                className="px-3 py-1.5 text-sm bg-destructive/20 text-destructive border border-destructive/30 rounded hover:bg-destructive/30 transition-colors disabled:opacity-50"
+              >
+                {isLoading ? 'Processing…' : 'Disable Notifications'}
+              </button>
+            ) : (
+              <button
+                onClick={subscribe}
+                disabled={isLoading}
+                className="px-3 py-1.5 text-sm bg-primary/20 text-primary border border-primary/30 rounded hover:bg-primary/30 transition-colors disabled:opacity-50"
+              >
+                {isLoading ? 'Requesting…' : 'Enable Notifications'}
+              </button>
+            )
           )}
         </div>
       </div>
