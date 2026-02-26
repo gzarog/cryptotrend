@@ -344,7 +344,7 @@ const Index = () => {
   }, [symbol])
 
   return (
-    <MainLayout>
+    <MainLayout onNotificationClick={() => setShowNotifDialog(true)}>
       <ControlBar
         symbol={symbol}
         onSymbolChange={setSymbol}
