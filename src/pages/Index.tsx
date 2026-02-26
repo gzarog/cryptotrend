@@ -118,7 +118,8 @@ const Index = () => {
   const [refreshSelection, setRefreshSelection] = useState('1')
   const [barLimit, setBarLimit] = useState(200)
   const [showNotifDialog, setShowNotifDialog] = useState(false)
-
+  const [showNotifPanel, setShowNotifPanel] = useState(false)
+  const [readNotifIds, setReadNotifIds] = useState<Set<string>>(new Set())
   // Notification state
   const [momentumNotifications, setMomentumNotifications] = useState<MomentumNotification[]>([])
   const [crossNotifications, setCrossNotifications] = useState<MovingAverageCrossNotification[]>([])
@@ -351,8 +352,36 @@ const Index = () => {
     prevQuantumPhaseRef.current = null
   }, [symbol])
 
+  const allNotifIds = useMemo(() => {
+    const ids: string[] = []
+    for (const n of momentumNotifications) ids.push(n.id)
+    for (const n of crossNotifications) ids.push(n.id)
+    for (const n of quantumNotifications) ids.push(n.id)
+    return ids
+  }, [momentumNotifications, crossNotifications, quantumNotifications])
+
+  const unreadCount = useMemo(
+    () => allNotifIds.filter(id => !readNotifIds.has(id)).length,
+    [allNotifIds, readNotifIds]
+  )
+
+  const handleMarkAllRead = useCallback(() => {
+    setReadNotifIds(new Set(allNotifIds))
+  }, [allNotifIds])
+
   return (
-    <MainLayout onNotificationClick={() => setShowNotifDialog(true)}>
+    <MainLayout
+      onNotificationClick={() => setShowNotifDialog(true)}
+      showNotifPanel={showNotifPanel}
+      onToggleNotifPanel={() => setShowNotifPanel(prev => !prev)}
+      onCloseNotifPanel={() => setShowNotifPanel(false)}
+      momentumNotifications={momentumNotifications}
+      crossNotifications={crossNotifications}
+      quantumNotifications={quantumNotifications}
+      readNotifIds={readNotifIds}
+      onMarkAllRead={handleMarkAllRead}
+      unreadCount={unreadCount}
+    >
       <ControlBar
         symbol={symbol}
         onSymbolChange={setSymbol}
