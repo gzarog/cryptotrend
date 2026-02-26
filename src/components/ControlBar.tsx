@@ -31,7 +31,7 @@ export function ControlBar({
   const [showSymbolDropdown, setShowSymbolDropdown] = useState(false)
 
   return (
-    <div className="glass-panel p-4 mb-6">
+    <div className="glass-panel p-4 mb-6 relative z-[100]">
       <div className="flex flex-wrap items-center gap-3">
         {/* Symbol Selector */}
         <div className="relative">
