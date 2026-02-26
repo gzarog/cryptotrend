@@ -58,3 +58,41 @@ export type BybitKlineResponse = {
     list?: string[][]
   }
 }
+
+export type MomentumComputation = {
+  symbol: string
+  timeframe: string
+  timeframeLabel: string
+  rsi: number | null
+  stochK: number | null
+  stochD: number | null
+  macdLine: number | null
+  macdSignal: number | null
+  macdHistogram: number | null
+  ema10: number | null
+  ema50: number | null
+  sma200: number | null
+  adx: number | null
+  atr: number | null
+  close: number | null
+  volume: number | null
+  candles: Candle[]
+}
+
+export type QuantumPhaseNotification = {
+  id: string
+  symbol: string
+  phase: 'accumulation' | 'markup' | 'distribution' | 'markdown'
+  phaseLabel: string
+  confidence: number
+  compositeScore: number
+  flipThreshold: number
+  direction: 'bullish' | 'bearish' | 'neutral'
+  triggeredAt: number
+}
+
+export type TimeframeOption = {
+  value: string
+  label: string
+  minutes: number
+}
