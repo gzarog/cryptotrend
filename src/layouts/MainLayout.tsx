@@ -5,7 +5,6 @@ import type { MomentumNotification, MovingAverageCrossNotification, QuantumPhase
 interface MainLayoutProps {
   children: React.ReactNode
   onNotificationClick?: () => void
-  // Notification panel props
   showNotifPanel?: boolean
   onToggleNotifPanel?: () => void
   onCloseNotifPanel?: () => void
@@ -13,7 +12,9 @@ interface MainLayoutProps {
   crossNotifications?: MovingAverageCrossNotification[]
   quantumNotifications?: QuantumPhaseNotification[]
   readNotifIds?: Set<string>
+  onMarkRead?: (id: string) => void
   onMarkAllRead?: () => void
+  onClearAllNotifs?: () => void
   unreadCount?: number
 }
 
@@ -27,7 +28,9 @@ export function MainLayout({
   crossNotifications = [],
   quantumNotifications = [],
   readNotifIds = new Set(),
+  onMarkRead,
   onMarkAllRead,
+  onClearAllNotifs,
   unreadCount = 0,
 }: MainLayoutProps) {
   return (
@@ -75,7 +78,9 @@ export function MainLayout({
             crossNotifications={crossNotifications}
             quantumNotifications={quantumNotifications}
             readIds={readNotifIds}
+            onMarkRead={(id) => onMarkRead?.(id)}
             onMarkAllRead={() => onMarkAllRead?.()}
+            onClearAll={() => onClearAllNotifs?.()}
             onSettingsClick={() => {
               onCloseNotifPanel?.()
               onNotificationClick?.()
