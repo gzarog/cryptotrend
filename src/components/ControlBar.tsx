@@ -46,7 +46,7 @@ export function ControlBar({
             </svg>
           </button>
           {showSymbolDropdown && (
-            <div className="absolute top-full left-0 mt-1 z-[100] glass-panel p-2 min-w-[160px] max-h-64 overflow-y-auto">
+            <div className="absolute top-full left-0 mt-1 z-[100] bg-card border border-white/10 shadow-2xl shadow-black/50 rounded-2xl p-2 min-w-[160px] max-h-64 overflow-y-auto">
               {SYMBOLS.map((s) => (
                 <button
                   key={s}
