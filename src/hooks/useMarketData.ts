@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import type { Candle, BybitKlineResponse } from '../types/app'
 
 const MAX_BAR_LIMIT = 5000
@@ -87,4 +87,42 @@ export function useMarketData(
     enabled,
     placeholderData: (previousData) => previousData,
   })
+}
+
+// ─── Multi-Timeframe Market Data ────────────────────────────────────────────
+
+export type MultiFrameResult = {
+  timeframe: string
+  candles: Candle[]
+  isLoading: boolean
+  isError: boolean
+}
+
+export function useMultiFrameMarketData(
+  symbol: string,
+  timeframes: string[],
+  barLimit: number,
+  refreshInterval: number | false,
+  enabled: boolean
+): MultiFrameResult[] {
+  const normalizedSymbol = symbol.trim().toUpperCase()
+
+  const queries = useQueries({
+    queries: timeframes.map((tf) => ({
+      queryKey: ['bybit-kline', normalizedSymbol, tf, barLimit],
+      queryFn: () => fetchBybitOHLCV(normalizedSymbol, tf, barLimit),
+      refetchInterval: refreshInterval,
+      refetchIntervalInBackground: true,
+      retry: 1,
+      enabled,
+      placeholderData: (prev: Candle[] | undefined) => prev,
+    })),
+  })
+
+  return queries.map((q, i) => ({
+    timeframe: timeframes[i],
+    candles: q.data ?? [],
+    isLoading: q.isLoading,
+    isError: q.isError,
+  }))
 }

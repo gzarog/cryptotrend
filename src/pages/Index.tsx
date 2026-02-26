@@ -1,11 +1,17 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { MainLayout } from '../layouts/MainLayout'
 import { ControlBar } from '../components/ControlBar'
-import { MarketSummary } from '../components/MarketSummary'
-import { IndicatorGrid } from '../components/IndicatorGrid'
-import { LineChart } from '../components/LineChart'
-import { useMarketData } from '../hooks/useMarketData'
-import { calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI, calculateMACD } from '../lib/indicators'
+import { DashboardView } from '../components/DashboardView'
+import { NotificationDialog } from '../components/NotificationDialog'
+import { useMarketData, useMultiFrameMarketData } from '../hooks/useMarketData'
+import { calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI, calculateMACD, calculateADX, calculateATR } from '../lib/indicators'
+import { deriveCombinedSignal, deriveTimeframeSnapshots, getMultiTimeframeSignal, getQualifiedSignals, deriveTrendBias } from '../lib/signals'
+import { deriveQuantumCompositeSignal, calculateMarkovPrior, calculateMultiTimeframeMarkovPriors } from '../lib/quantum'
+import { createNotificationId, showBrowserNotification } from '../lib/notifications'
+import type { MomentumNotification, MovingAverageCrossNotification, QuantumPhaseNotification, MomentumComputation } from '../types/app'
+import type { TimeframeSignalSnapshot, QuantumCompositeSignal } from '../types/signals'
+
+// ─── Timeframe-Adaptive Settings ────────────────────────────────────────────
 
 const RSI_SETTINGS: Record<string, { period: number; label: string }> = {
   '5': { period: 8, label: '7–9' },
@@ -40,24 +46,96 @@ const MACD_SETTINGS: Record<string, { fast: number; slow: number; signal: number
 }
 const DEFAULT_MACD = { fast: 12, slow: 26, signal: 9 }
 
-const LAST_REFRESH_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  hour: '2-digit', minute: '2-digit', second: '2-digit',
-})
+const MULTI_TF_LIST = ['5', '15', '30', '60', '120', '240', '360']
+
+const TF_LABELS: Record<string, string> = {
+  '5': '5m', '15': '15m', '30': '30m', '60': '1H',
+  '120': '2H', '240': '4H', '360': '6H', 'D': '1D', 'W': '1W',
+}
 
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
 })
+
+const LAST_REFRESH_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+})
+
+// ─── MA Cross Detection ─────────────────────────────────────────────────────
+
+function detectMACross(
+  ema10: Array<number | null>,
+  ema50: Array<number | null>,
+  prevCrossState: 'golden' | 'death' | null
+): { direction: 'golden' | 'death'; index: number } | null {
+  if (ema10.length < 2 || ema50.length < 2) return null
+
+  const len = ema10.length
+  const curr10 = ema10[len - 1]
+  const curr50 = ema50[len - 1]
+  const prev10 = ema10[len - 2]
+  const prev50 = ema50[len - 2]
+
+  if (curr10 === null || curr50 === null || prev10 === null || prev50 === null) return null
+
+  if (prev10 <= prev50 && curr10 > curr50 && prevCrossState !== 'golden') {
+    return { direction: 'golden', index: len - 1 }
+  }
+  if (prev10 >= prev50 && curr10 < curr50 && prevCrossState !== 'death') {
+    return { direction: 'death', index: len - 1 }
+  }
+
+  return null
+}
+
+// ─── Momentum Detection ─────────────────────────────────────────────────────
+
+function detectMomentum(
+  rsi: number | null,
+  stochD: number | null,
+  timeframe: string,
+  timeframeLabel: string
+): { direction: 'long' | 'short'; intensity: MomentumNotification['intensity'] } | null {
+  if (rsi === null || stochD === null) return null
+
+  // Strong long: RSI < 25 and StochD < 15
+  if (rsi < 25 && stochD < 15) return { direction: 'long', intensity: 'green' }
+  // Moderate long: RSI < 35 and StochD < 25
+  if (rsi < 35 && stochD < 25) return { direction: 'long', intensity: 'yellow' }
+  // Strong short: RSI > 75 and StochD > 85
+  if (rsi > 75 && stochD > 85) return { direction: 'short', intensity: 'orange' }
+  // Extreme short: RSI > 85 and StochD > 90
+  if (rsi > 85 && stochD > 90) return { direction: 'short', intensity: 'red' }
+
+  return null
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
 
 const Index = () => {
   const [symbol, setSymbol] = useState('BTCUSDT')
   const [timeframe, setTimeframe] = useState('15')
   const [refreshSelection, setRefreshSelection] = useState('1')
   const [barLimit, setBarLimit] = useState(200)
+  const [showNotifDialog, setShowNotifDialog] = useState(false)
+
+  // Notification state
+  const [momentumNotifications, setMomentumNotifications] = useState<MomentumNotification[]>([])
+  const [crossNotifications, setCrossNotifications] = useState<MovingAverageCrossNotification[]>([])
+  const [quantumNotifications, setQuantumNotifications] = useState<QuantumPhaseNotification[]>([])
+  const prevCrossRef = useRef<'golden' | 'death' | null>(null)
+  const prevQuantumPhaseRef = useRef<string | null>(null)
 
   const refreshInterval = parseFloat(refreshSelection) * 60 * 1000
 
+  // Primary timeframe data
   const { data: candles, isLoading, isError, error, isFetching, refetch } = useMarketData(
     symbol, timeframe, barLimit, refreshInterval, true
+  )
+
+  // Multi-timeframe data for signals
+  const multiFrameResults = useMultiFrameMarketData(
+    symbol, MULTI_TF_LIST, Math.min(barLimit, 200), refreshInterval, true
   )
 
   const lastUpdated = useMemo(() => {
@@ -65,12 +143,8 @@ const Index = () => {
     return LAST_REFRESH_FORMATTER.format(new Date())
   }, [candles])
 
-  const closes = useMemo(() => candles?.map((c) => c.close) ?? [], [candles])
-
-  const labels = useMemo(
-    () => candles?.map((c) => DATE_FORMATTER.format(new Date(c.openTime))) ?? [],
-    [candles]
-  )
+  const closes = useMemo(() => candles?.map(c => c.close) ?? [], [candles])
+  const labels = useMemo(() => candles?.map(c => DATE_FORMATTER.format(new Date(c.openTime))) ?? [], [candles])
 
   const latestCandle = candles?.[candles.length - 1] ?? null
   const firstCandle = candles?.[0] ?? null
@@ -78,52 +152,196 @@ const Index = () => {
   const priceChange = useMemo(() => {
     if (!latestCandle || !firstCandle) return null
     const diff = latestCandle.close - firstCandle.open
-    const pct = (diff / firstCandle.open) * 100
-    return { difference: diff, percent: pct }
+    return { difference: diff, percent: (diff / firstCandle.open) * 100 }
   }, [latestCandle, firstCandle])
 
-  // RSI
+  // ─── Primary Timeframe Indicators ─────────────────────────────────────────
+
   const rsiSetting = RSI_SETTINGS[timeframe] ?? DEFAULT_RSI
   const rsiValues = useMemo(() => calculateRSI(closes, rsiSetting.period), [closes, rsiSetting.period])
 
-  // Stochastic RSI
   const stochSetting = STOCH_SETTINGS[timeframe] ?? DEFAULT_STOCH
   const stochastic = useMemo(
     () => calculateStochasticRSI(closes, stochSetting.rsiLength, stochSetting.stochLength, stochSetting.kSmoothing, stochSetting.dSmoothing),
     [closes, stochSetting]
   )
 
-  // MACD
   const macdSetting = MACD_SETTINGS[timeframe] ?? DEFAULT_MACD
   const macd = useMemo(
     () => calculateMACD(closes, macdSetting.fast, macdSetting.slow, macdSetting.signal),
     [closes, macdSetting]
   )
 
-  // Moving averages for price chart
   const ema10 = useMemo(() => calculateEMA(closes, 10), [closes])
   const ema50 = useMemo(() => calculateEMA(closes, 50), [closes])
   const ma200 = useMemo(() => calculateSMA(closes, 200), [closes])
 
-  // Latest indicator values
+  const adxResult = useMemo(() => candles ? calculateADX(candles, 14) : { adx: [], diPlus: [], diMinus: [] }, [candles])
+  const atrValues = useMemo(() => candles ? calculateATR(candles, 14) : [], [candles])
+
   const latestRSI = rsiValues[rsiValues.length - 1] ?? null
   const latestStochK = stochastic.kValues[stochastic.kValues.length - 1] ?? null
   const latestStochD = stochastic.dValues[stochastic.dValues.length - 1] ?? null
   const latestMACDLine = macd.macdLine[macd.macdLine.length - 1] ?? null
   const latestMACDSignal = macd.signalLine[macd.signalLine.length - 1] ?? null
   const latestMACDHist = macd.histogram[macd.histogram.length - 1] ?? null
+  const latestADX = adxResult.adx[adxResult.adx.length - 1] ?? null
+  const latestATR = atrValues[atrValues.length - 1] ?? null
 
-  const rsiGuideLines = [
-    { value: 70, label: '70', color: 'hsl(0 84% 60%)' },
-    { value: 30, label: '30', color: 'hsl(160 84% 39%)' },
-    { value: 50, label: '50', color: 'hsl(215 20% 40%)' },
-  ]
+  // ─── Multi-Timeframe Computations ─────────────────────────────────────────
 
-  const stochGuideLines = [
-    { value: 80, label: '80', color: 'hsl(0 84% 60%)' },
-    { value: 20, label: '20', color: 'hsl(160 84% 39%)' },
-    { value: 50, label: '50', color: 'hsl(215 20% 40%)' },
-  ]
+  const computations = useMemo<MomentumComputation[]>(() => {
+    return multiFrameResults
+      .filter(r => r.candles.length > 0)
+      .map(r => {
+        const c = r.candles.map(x => x.close)
+        const tfRsiSetting = RSI_SETTINGS[r.timeframe] ?? DEFAULT_RSI
+        const tfStochSetting = STOCH_SETTINGS[r.timeframe] ?? DEFAULT_STOCH
+        const tfMacdSetting = MACD_SETTINGS[r.timeframe] ?? DEFAULT_MACD
+
+        const tfRsi = calculateRSI(c, tfRsiSetting.period)
+        const tfStoch = calculateStochasticRSI(c, tfStochSetting.rsiLength, tfStochSetting.stochLength, tfStochSetting.kSmoothing, tfStochSetting.dSmoothing)
+        const tfMacd = calculateMACD(c, tfMacdSetting.fast, tfMacdSetting.slow, tfMacdSetting.signal)
+        const tfEma10 = calculateEMA(c, 10)
+        const tfEma50 = calculateEMA(c, 50)
+        const tfSma200 = calculateSMA(c, 200)
+        const tfAdx = calculateADX(r.candles, 14)
+        const tfAtr = calculateATR(r.candles, 14)
+
+        return {
+          symbol,
+          timeframe: r.timeframe,
+          timeframeLabel: TF_LABELS[r.timeframe] ?? r.timeframe,
+          rsi: tfRsi[tfRsi.length - 1] ?? null,
+          stochK: tfStoch.kValues[tfStoch.kValues.length - 1] ?? null,
+          stochD: tfStoch.dValues[tfStoch.dValues.length - 1] ?? null,
+          macdLine: tfMacd.macdLine[tfMacd.macdLine.length - 1] ?? null,
+          macdSignal: tfMacd.signalLine[tfMacd.signalLine.length - 1] ?? null,
+          macdHistogram: tfMacd.histogram[tfMacd.histogram.length - 1] ?? null,
+          ema10: tfEma10[tfEma10.length - 1] ?? null,
+          ema50: tfEma50[tfEma50.length - 1] ?? null,
+          sma200: tfSma200[tfSma200.length - 1] ?? null,
+          adx: tfAdx.adx[tfAdx.adx.length - 1] ?? null,
+          atr: tfAtr[tfAtr.length - 1] ?? null,
+          close: c[c.length - 1] ?? null,
+          volume: r.candles[r.candles.length - 1]?.volume ?? null,
+          candles: r.candles,
+        }
+      })
+  }, [multiFrameResults, symbol])
+
+  // ─── Markov Priors ────────────────────────────────────────────────────────
+
+  const markovPriors = useMemo(() => {
+    const candlesByTf: Record<string, typeof candles & {}> = {}
+    for (const r of multiFrameResults) {
+      if (r.candles.length > 0) candlesByTf[r.timeframe] = r.candles
+    }
+    return calculateMultiTimeframeMarkovPriors(candlesByTf)
+  }, [multiFrameResults])
+
+  // ─── Signal Derivation ────────────────────────────────────────────────────
+
+  const snapshots = useMemo<TimeframeSignalSnapshot[]>(
+    () => deriveTimeframeSnapshots(computations, markovPriors),
+    [computations, markovPriors]
+  )
+
+  const qualifiedSignals = useMemo(() => getQualifiedSignals(snapshots), [snapshots])
+
+  const multiTfSignal = useMemo(
+    () => snapshots.length > 0 ? getMultiTimeframeSignal(snapshots) : null,
+    [snapshots]
+  )
+
+  // ─── Quantum Analysis ────────────────────────────────────────────────────
+
+  const quantumSignal = useMemo<QuantumCompositeSignal | null>(() => {
+    if (!candles || candles.length < 60) return null
+    return deriveQuantumCompositeSignal(candles)
+  }, [candles])
+
+  // ─── MA Cross Detection ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    const cross = detectMACross(ema10, ema50, prevCrossRef.current)
+    if (cross && latestCandle) {
+      prevCrossRef.current = cross.direction
+      const notif: MovingAverageCrossNotification = {
+        id: createNotificationId(),
+        symbol,
+        timeframe,
+        timeframeLabel: TF_LABELS[timeframe] ?? timeframe,
+        pairLabel: 'EMA 10 / EMA 50',
+        direction: cross.direction,
+        intensity: cross.direction === 'golden' ? 'green' : 'yellow',
+        price: latestCandle.close,
+        triggeredAt: Date.now(),
+      }
+      setCrossNotifications(prev => [notif, ...prev].slice(0, 10))
+      showBrowserNotification(
+        `${cross.direction === 'golden' ? '🟡 Golden' : '🟣 Death'} Cross — ${symbol}`,
+        `EMA 10/50 ${cross.direction} cross at $${latestCandle.close.toLocaleString()}`
+      )
+    }
+  }, [ema10, ema50, symbol, timeframe, latestCandle])
+
+  // ─── Momentum Detection ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    const momentum = detectMomentum(latestRSI, latestStochD, timeframe, TF_LABELS[timeframe] ?? timeframe)
+    if (momentum) {
+      const notif: MomentumNotification = {
+        id: createNotificationId(),
+        symbol,
+        direction: momentum.direction,
+        intensity: momentum.intensity,
+        label: `${momentum.direction === 'long' ? '🟢' : '🔴'} ${momentum.direction.toUpperCase()} Momentum`,
+        timeframeSummary: TF_LABELS[timeframe] ?? timeframe,
+        rsiSummary: latestRSI?.toFixed(1) ?? '—',
+        stochasticSummary: latestStochD?.toFixed(1) ?? '—',
+        readings: [],
+        triggeredAt: Date.now(),
+      }
+      setMomentumNotifications(prev => {
+        // Dedupe by direction within 60s
+        const recent = prev.filter(p => Date.now() - p.triggeredAt < 60000 && p.direction === momentum.direction)
+        if (recent.length > 0) return prev
+        return [notif, ...prev].slice(0, 10)
+      })
+    }
+  }, [latestRSI, latestStochD, symbol, timeframe])
+
+  // ─── Quantum Phase Notification ───────────────────────────────────────────
+
+  useEffect(() => {
+    if (!quantumSignal || quantumSignal.confidence < 0.3) return
+    const phaseKey = `${quantumSignal.phase}-${quantumSignal.direction}`
+    if (phaseKey === prevQuantumPhaseRef.current) return
+    prevQuantumPhaseRef.current = phaseKey
+
+    const notif: QuantumPhaseNotification = {
+      id: createNotificationId(),
+      symbol,
+      phase: quantumSignal.phase,
+      phaseLabel: quantumSignal.phaseLabel,
+      confidence: quantumSignal.confidence,
+      compositeScore: quantumSignal.compositeScore,
+      flipThreshold: quantumSignal.flipThreshold,
+      direction: quantumSignal.direction,
+      triggeredAt: Date.now(),
+    }
+    setQuantumNotifications(prev => [notif, ...prev].slice(0, 5))
+  }, [quantumSignal, symbol])
+
+  // Clear notifications on symbol change
+  useEffect(() => {
+    setMomentumNotifications([])
+    setCrossNotifications([])
+    setQuantumNotifications([])
+    prevCrossRef.current = null
+    prevQuantumPhaseRef.current = null
+  }, [symbol])
 
   return (
     <MainLayout>
@@ -141,75 +359,40 @@ const Index = () => {
         lastUpdated={lastUpdated}
       />
 
-      <MarketSummary
+      <DashboardView
         symbol={symbol}
+        candles={candles ?? []}
+        labels={labels}
+        closes={closes}
+        isLoading={isLoading}
         price={latestCandle?.close ?? null}
         priceChange={priceChange}
+        rsi={rsiValues}
+        rsiPeriod={rsiSetting.period}
+        stochK={stochastic.kValues}
+        stochD={stochastic.dValues}
+        macdLine={macd.macdLine}
+        macdSignal={macd.signalLine}
+        macdHistogram={macd.histogram}
+        macdSettings={macdSetting}
+        ema10={ema10}
+        ema50={ema50}
+        ma200={ma200}
+        latestRSI={latestRSI}
+        latestStochK={latestStochK}
+        latestStochD={latestStochD}
+        latestMACDLine={latestMACDLine}
+        latestMACDSignal={latestMACDSignal}
+        latestMACDHist={latestMACDHist}
+        momentumNotifications={momentumNotifications}
+        crossNotifications={crossNotifications}
+        quantumNotifications={quantumNotifications}
+        snapshots={snapshots}
+        qualifiedSignals={qualifiedSignals}
+        multiTfSignal={multiTfSignal}
+        quantumSignal={quantumSignal}
+        latestADX={latestADX}
       />
-
-      <IndicatorGrid
-        rsi={latestRSI}
-        stochK={latestStochK}
-        stochD={latestStochD}
-        macdLine={latestMACDLine}
-        macdSignal={latestMACDSignal}
-        macdHistogram={latestMACDHist}
-      />
-
-      {/* Price Chart with Moving Averages */}
-      <div className="mb-6">
-        <LineChart
-          title={`${symbol} Price`}
-          labels={labels}
-          series={[
-            { name: 'Price', data: closes, color: 'hsl(187 94% 55%)' },
-            { name: 'EMA 10', data: ema10, color: 'hsl(45 93% 47%)' },
-            { name: 'EMA 50', data: ema50, color: 'hsl(260 60% 55%)' },
-            ...(ma200.some((v) => v !== null) ? [{ name: 'MA 200', data: ma200, color: 'hsl(0 84% 60%)' }] : []),
-          ]}
-          isLoading={isLoading}
-        />
-      </div>
-
-      {/* RSI Chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <LineChart
-          title={`RSI (${rsiSetting.period})`}
-          labels={labels}
-          data={rsiValues}
-          color="hsl(260 60% 65%)"
-          yDomain={{ min: 0, max: 100 }}
-          guideLines={rsiGuideLines}
-          isLoading={isLoading}
-        />
-
-        {/* Stochastic RSI */}
-        <LineChart
-          title="Stochastic RSI"
-          labels={labels}
-          series={[
-            { name: '%K', data: stochastic.kValues, color: 'hsl(187 94% 55%)' },
-            { name: '%D', data: stochastic.dValues, color: 'hsl(45 93% 47%)' },
-          ]}
-          yDomain={{ min: 0, max: 100 }}
-          guideLines={stochGuideLines}
-          isLoading={isLoading}
-        />
-      </div>
-
-      {/* MACD Chart */}
-      <div className="mb-6">
-        <LineChart
-          title={`MACD (${macdSetting.fast}, ${macdSetting.slow}, ${macdSetting.signal})`}
-          labels={labels}
-          series={[
-            { name: 'MACD', data: macd.macdLine, color: 'hsl(187 94% 55%)' },
-            { name: 'Signal', data: macd.signalLine, color: 'hsl(0 84% 60%)' },
-          ]}
-          guideLines={[{ value: 0, label: '0', color: 'hsl(215 20% 40%)' }]}
-          isLoading={isLoading}
-        />
-      </div>
 
       {isError && (
         <div className="glass-panel p-4 border border-destructive/40 bg-destructive/10 text-center">
@@ -218,6 +401,8 @@ const Index = () => {
           </p>
         </div>
       )}
+
+      <NotificationDialog open={showNotifDialog} onClose={() => setShowNotifDialog(false)} />
     </MainLayout>
   )
 }
