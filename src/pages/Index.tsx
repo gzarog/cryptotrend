@@ -307,6 +307,10 @@ const Index = () => {
         // Dedupe by direction within 60s
         const recent = prev.filter(p => Date.now() - p.triggeredAt < 60000 && p.direction === momentum.direction)
         if (recent.length > 0) return prev
+        showBrowserNotification(
+          `${momentum.direction === 'long' ? '🟢' : '🔴'} ${momentum.direction.toUpperCase()} Momentum — ${symbol}`,
+          `RSI: ${latestRSI?.toFixed(1) ?? '—'} | Stoch D: ${latestStochD?.toFixed(1) ?? '—'} (${TF_LABELS[timeframe] ?? timeframe})`
+        )
         return [notif, ...prev].slice(0, 10)
       })
     }
@@ -332,6 +336,10 @@ const Index = () => {
       triggeredAt: Date.now(),
     }
     setQuantumNotifications(prev => [notif, ...prev].slice(0, 5))
+    showBrowserNotification(
+      `⚛ ${quantumSignal.phaseLabel} Phase — ${symbol}`,
+      `Direction: ${quantumSignal.direction} | Confidence: ${(quantumSignal.confidence * 100).toFixed(0)}%`
+    )
   }, [quantumSignal, symbol])
 
   // Clear notifications on symbol change
