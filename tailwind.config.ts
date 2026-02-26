@@ -57,6 +57,17 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        momentum: {
+          green: "hsl(var(--momentum-green))",
+          yellow: "hsl(var(--momentum-yellow))",
+          orange: "hsl(var(--momentum-orange))",
+          red: "hsl(var(--momentum-red))",
+        },
+        signal: {
+          bullish: "hsl(var(--signal-bullish))",
+          bearish: "hsl(var(--signal-bearish))",
+          neutral: "hsl(var(--signal-neutral))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -65,20 +76,12 @@ export default {
       },
       keyframes: {
         "accordion-down": {
-          from: {
-            height: "0",
-          },
-          to: {
-            height: "var(--radix-accordion-content-height)",
-          },
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
-          from: {
-            height: "var(--radix-accordion-content-height)",
-          },
-          to: {
-            height: "0",
-          },
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
         },
       },
       animation: {
