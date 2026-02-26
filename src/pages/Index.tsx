@@ -343,11 +343,8 @@ const Index = () => {
     )
   }, [quantumSignal, symbol])
 
-  // Clear notifications on symbol change
+  // Reset detection refs on symbol change (keep notification history)
   useEffect(() => {
-    setMomentumNotifications([])
-    setCrossNotifications([])
-    setQuantumNotifications([])
     prevCrossRef.current = null
     prevQuantumPhaseRef.current = null
   }, [symbol])
@@ -365,9 +362,20 @@ const Index = () => {
     [allNotifIds, readNotifIds]
   )
 
+  const handleMarkRead = useCallback((id: string) => {
+    setReadNotifIds(prev => new Set([...prev, id]))
+  }, [])
+
   const handleMarkAllRead = useCallback(() => {
     setReadNotifIds(new Set(allNotifIds))
   }, [allNotifIds])
+
+  const handleClearAll = useCallback(() => {
+    setMomentumNotifications([])
+    setCrossNotifications([])
+    setQuantumNotifications([])
+    setReadNotifIds(new Set())
+  }, [])
 
   return (
     <MainLayout
@@ -379,7 +387,9 @@ const Index = () => {
       crossNotifications={crossNotifications}
       quantumNotifications={quantumNotifications}
       readNotifIds={readNotifIds}
+      onMarkRead={handleMarkRead}
       onMarkAllRead={handleMarkAllRead}
+      onClearAllNotifs={handleClearAll}
       unreadCount={unreadCount}
     >
       <ControlBar
