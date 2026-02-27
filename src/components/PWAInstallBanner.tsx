@@ -66,7 +66,7 @@ export function PWAInstallBanner() {
             <p className="text-xs text-muted-foreground mt-0.5">
               {isIOS
                 ? 'Tap the Share button, then "Add to Home Screen"'
-                : 'Get instant alerts on your home screen'}
+                : 'Install for quick access — works on desktop & mobile'}
             </p>
           </div>
         </div>
