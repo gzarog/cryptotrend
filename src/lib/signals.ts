@@ -4,7 +4,7 @@ import type {
   SignalStrength,
   TradingSignal,
   CombinedSignal,
-  MultiTimeframeSignal,
+  
   TimeframeSignalSnapshot,
   TrendBias,
   QualifiedSignal,
@@ -242,57 +242,6 @@ export function deriveTimeframeSnapshots(
   })
 }
 
-// ─── Multi-Timeframe Signal ─────────────────────────────────────────────────
-
-export function getMultiTimeframeSignal(
-  snapshots: TimeframeSignalSnapshot[],
-  weights: Record<string, number> = {}
-): MultiTimeframeSignal {
-  const defaultWeight = 1 / Math.max(snapshots.length, 1)
-  let weightedScore = 0
-  let totalWeight = 0
-  let aligned = 0
-
-  const timeframeSignals: Record<string, CombinedSignal> = {}
-  const dominantDirection = getDominantDirection(snapshots)
-
-  for (const snap of snapshots) {
-    const w = weights[snap.timeframe] ?? defaultWeight
-    const dirMultiplier = snap.signal.direction === 'long' ? 1 : snap.signal.direction === 'short' ? -1 : 0
-    weightedScore += dirMultiplier * snap.signal.confidence * w
-    totalWeight += w
-    timeframeSignals[snap.timeframe] = snap.signal
-
-    if (snap.signal.direction === dominantDirection) aligned++
-  }
-
-  const normalizedScore = totalWeight > 0 ? weightedScore / totalWeight : 0
-  const confidence = Math.min(Math.abs(normalizedScore), 1)
-  const direction = scoreToDirection(normalizedScore)
-  const alignmentRatio = snapshots.length > 0 ? aligned / snapshots.length : 0
-
-  return {
-    direction,
-    strength: confidenceToStrength(confidence),
-    confidence,
-    label: `${directionLabel(direction)} (${(confidence * 100).toFixed(0)}% - ${(alignmentRatio * 100).toFixed(0)}% aligned)`,
-    timeframeSignals,
-    weightedScore: normalizedScore,
-    alignmentRatio,
-  }
-}
-
-function getDominantDirection(snapshots: TimeframeSignalSnapshot[]): SignalDirection {
-  let longCount = 0
-  let shortCount = 0
-  for (const s of snapshots) {
-    if (s.signal.direction === 'long') longCount++
-    if (s.signal.direction === 'short') shortCount++
-  }
-  if (longCount > shortCount) return 'long'
-  if (shortCount > longCount) return 'short'
-  return 'neutral'
-}
 
 
 // ─── Qualified Signals ──────────────────────────────────────────────────────
