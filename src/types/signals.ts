@@ -95,15 +95,3 @@ export type QualifiedSignal = {
   details: string
 }
 
-export type QuantumCompositeSignal = {
-  phase: 'accumulation' | 'markup' | 'distribution' | 'markdown'
-  phaseLabel: string
-  confidence: number
-  compositeScore: number
-  flipThreshold: number
-  direction: 'bullish' | 'bearish' | 'neutral'
-  phaseAngle: number
-  amplitude: number
-  markovState: number
-  transitionProbabilities: number[][]
-}

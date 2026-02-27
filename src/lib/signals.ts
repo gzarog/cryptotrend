@@ -504,3 +504,35 @@ export function deriveSignalsFromHeatmap(snapshot: HeatmapSnapshot | null): Heat
     signalConfidence: Math.abs(sentimentScore) * 0.6,
   }
 }
+
+// ─── Markov Prior from Candles ───────────────────────────────────────────────
+
+export function calculateMarkovPrior(candles: Candle[], lookback: number = 50): number {
+  if (candles.length < lookback + 2) return 0
+
+  const recentCandles = candles.slice(-lookback)
+  let upCount = 0
+  let downCount = 0
+
+  for (let i = 1; i < recentCandles.length; i++) {
+    if (recentCandles[i].close > recentCandles[i - 1].close) upCount++
+    else if (recentCandles[i].close < recentCandles[i - 1].close) downCount++
+  }
+
+  const total = upCount + downCount
+  if (total === 0) return 0
+
+  return (upCount - downCount) / total
+}
+
+// ─── Multi-Timeframe Markov Priors ──────────────────────────────────────────
+
+export function calculateMultiTimeframeMarkovPriors(
+  candlesByTimeframe: Record<string, Candle[]>
+): Record<string, number> {
+  const priors: Record<string, number> = {}
+  for (const [tf, candles] of Object.entries(candlesByTimeframe)) {
+    priors[tf] = calculateMarkovPrior(candles)
+  }
+  return priors
+}

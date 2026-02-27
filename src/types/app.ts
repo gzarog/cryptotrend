@@ -79,18 +79,6 @@ export type MomentumComputation = {
   candles: Candle[]
 }
 
-export type QuantumPhaseNotification = {
-  id: string
-  symbol: string
-  phase: 'accumulation' | 'markup' | 'distribution' | 'markdown'
-  phaseLabel: string
-  confidence: number
-  compositeScore: number
-  flipThreshold: number
-  direction: 'bullish' | 'bearish' | 'neutral'
-  triggeredAt: number
-}
-
 export type TimeframeOption = {
   value: string
   label: string

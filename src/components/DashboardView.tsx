@@ -1,5 +1,5 @@
-import type { MomentumNotification, MovingAverageCrossNotification, QuantumPhaseNotification, MomentumComputation, Candle } from '../types/app'
-import type { TimeframeSignalSnapshot, QualifiedSignal, MultiTimeframeSignal, QuantumCompositeSignal } from '../types/signals'
+import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, Candle } from '../types/app'
+import type { TimeframeSignalSnapshot, QualifiedSignal, MultiTimeframeSignal } from '../types/signals'
 import { LineChart } from './LineChart'
 import { MarketSummary } from './MarketSummary'
 import { IndicatorGrid } from './IndicatorGrid'
@@ -43,13 +43,11 @@ type Props = {
   // Notifications
   momentumNotifications: MomentumNotification[]
   crossNotifications: MovingAverageCrossNotification[]
-  quantumNotifications: QuantumPhaseNotification[]
 
   // Signals
   snapshots: TimeframeSignalSnapshot[]
   qualifiedSignals: QualifiedSignal[]
   multiTfSignal: MultiTimeframeSignal | null
-  quantumSignal: QuantumCompositeSignal | null
 
   // Hedging
   latestADX: number | null
@@ -76,8 +74,8 @@ export function DashboardView(props: Props) {
     ema10, ema50, ma200,
     latestRSI, latestStochK, latestStochD,
     latestMACDLine, latestMACDSignal, latestMACDHist,
-    momentumNotifications, crossNotifications, quantumNotifications,
-    snapshots, qualifiedSignals, multiTfSignal, quantumSignal,
+    momentumNotifications, crossNotifications,
+    snapshots, qualifiedSignals, multiTfSignal,
     latestADX,
   } = props
 
@@ -115,21 +113,6 @@ export function DashboardView(props: Props) {
               <p className="text-xs text-muted-foreground mt-1">
                 Price: ${n.price.toLocaleString()}
               </p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {quantumNotifications.length > 0 && (
-        <div className="space-y-2">
-          {quantumNotifications.slice(0, 2).map((n) => (
-            <div key={n.id} className={`glass-panel p-3 border-l-4 ${n.direction === 'bullish' ? 'border-l-green-500' : n.direction === 'bearish' ? 'border-l-red-500' : 'border-l-gray-500'}`}>
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">⚛ {n.phaseLabel} Phase</span>
-                <span className="text-xs text-muted-foreground">
-                  {(n.confidence * 100).toFixed(0)}% confidence
-                </span>
-              </div>
             </div>
           ))}
         </div>
@@ -210,7 +193,6 @@ export function DashboardView(props: Props) {
             snapshots={snapshots}
             qualifiedSignals={qualifiedSignals}
             multiTfSignal={multiTfSignal}
-            quantumSignal={quantumSignal}
           />
         </div>
       )}

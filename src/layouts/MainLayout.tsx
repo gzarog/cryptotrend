@@ -1,6 +1,6 @@
 import React from 'react'
 import { NotificationPanel } from '../components/NotificationPanel'
-import type { MomentumNotification, MovingAverageCrossNotification, QuantumPhaseNotification } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification } from '../types/app'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -10,7 +10,6 @@ interface MainLayoutProps {
   onCloseNotifPanel?: () => void
   momentumNotifications?: MomentumNotification[]
   crossNotifications?: MovingAverageCrossNotification[]
-  quantumNotifications?: QuantumPhaseNotification[]
   readNotifIds?: Set<string>
   onMarkRead?: (id: string) => void
   onMarkAllRead?: () => void
@@ -26,7 +25,6 @@ export function MainLayout({
   onCloseNotifPanel,
   momentumNotifications = [],
   crossNotifications = [],
-  quantumNotifications = [],
   readNotifIds = new Set(),
   onMarkRead,
   onMarkAllRead,
@@ -76,7 +74,7 @@ export function MainLayout({
             onClose={() => onCloseNotifPanel?.()}
             momentumNotifications={momentumNotifications}
             crossNotifications={crossNotifications}
-            quantumNotifications={quantumNotifications}
+            
             readIds={readNotifIds}
             onMarkRead={(id) => onMarkRead?.(id)}
             onMarkAllRead={() => onMarkAllRead?.()}
