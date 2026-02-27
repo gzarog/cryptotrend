@@ -112,7 +112,11 @@ function detectMomentum(
 // ─── Component ──────────────────────────────────────────────────────────────
 
 const Index = () => {
-  const [symbol, setSymbol] = useState('BTCUSDT')
+  const [symbol, setSymbol] = useState(() => localStorage.getItem('selected-symbol') || 'BTCUSDT')
+  const handleSymbolChange = useCallback((s: string) => {
+    setSymbol(s)
+    localStorage.setItem('selected-symbol', s)
+  }, [])
   const [timeframe, setTimeframe] = useState('15')
   const [refreshSelection, setRefreshSelection] = useState('1')
   const [barLimit, setBarLimit] = useState(400)
@@ -350,7 +354,7 @@ const Index = () => {
     >
       <ControlBar
         symbol={symbol}
-        onSymbolChange={setSymbol}
+        onSymbolChange={handleSymbolChange}
         timeframe={timeframe}
         onTimeframeChange={setTimeframe}
         refreshSelection={refreshSelection}
