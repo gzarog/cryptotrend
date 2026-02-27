@@ -5,7 +5,7 @@ import { DashboardView } from '../components/DashboardView'
 import { NotificationDialog } from '../components/NotificationDialog'
 import { useMarketData, useMultiFrameMarketData } from '../hooks/useMarketData'
 import { calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI, calculateMACD, calculateADX, calculateATR } from '../lib/indicators'
-import { deriveCombinedSignal, deriveTimeframeSnapshots, getMultiTimeframeSignal, getQualifiedSignals, deriveTrendBias, calculateMarkovPrior, calculateMultiTimeframeMarkovPriors } from '../lib/signals'
+import { deriveCombinedSignal, deriveTimeframeSnapshots, getQualifiedSignals, deriveTrendBias, calculateMarkovPrior, calculateMultiTimeframeMarkovPriors } from '../lib/signals'
 import { createNotificationId, showBrowserNotification } from '../lib/notifications'
 import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation } from '../types/app'
 import type { TimeframeSignalSnapshot } from '../types/signals'
@@ -247,10 +247,6 @@ const Index = () => {
 
   const qualifiedSignals = useMemo(() => getQualifiedSignals(snapshots), [snapshots])
 
-  const multiTfSignal = useMemo(
-    () => snapshots.length > 0 ? getMultiTimeframeSignal(snapshots) : null,
-    [snapshots]
-  )
 
   // ─── MA Cross Detection ───────────────────────────────────────────────────
 
@@ -395,7 +391,6 @@ const Index = () => {
         crossNotifications={crossNotifications}
         snapshots={snapshots}
         qualifiedSignals={qualifiedSignals}
-        multiTfSignal={multiTfSignal}
       />
 
       {isError && (

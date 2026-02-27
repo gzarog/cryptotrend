@@ -1,5 +1,5 @@
 import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, Candle } from '../types/app'
-import type { TimeframeSignalSnapshot, QualifiedSignal, MultiTimeframeSignal } from '../types/signals'
+import type { TimeframeSignalSnapshot, QualifiedSignal } from '../types/signals'
 import { LineChart } from './LineChart'
 import { MarketSummary } from './MarketSummary'
 import { IndicatorGrid } from './IndicatorGrid'
@@ -45,7 +45,6 @@ type Props = {
   // Signals
   snapshots: TimeframeSignalSnapshot[]
   qualifiedSignals: QualifiedSignal[]
-  multiTfSignal: MultiTimeframeSignal | null
 
 }
 
@@ -71,7 +70,7 @@ export function DashboardView(props: Props) {
     latestRSI, latestStochK, latestStochD,
     latestMACDLine, latestMACDSignal, latestMACDHist,
     momentumNotifications, crossNotifications,
-    snapshots, qualifiedSignals, multiTfSignal,
+    snapshots, qualifiedSignals,
   } = props
 
   return (
@@ -187,7 +186,6 @@ export function DashboardView(props: Props) {
           <SignalsPanel
             snapshots={snapshots}
             qualifiedSignals={qualifiedSignals}
-            multiTfSignal={multiTfSignal}
           />
         </div>
       )}
