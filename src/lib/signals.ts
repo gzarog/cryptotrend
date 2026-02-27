@@ -12,7 +12,7 @@ import type {
   SignalPresetConfig,
   ExpertSignalResult,
 } from '../types/signals'
-import type { HeatmapSnapshot, HeatmapSignalDerivation } from '../types/heatmap'
+
 
 // ─── Signal Presets ─────────────────────────────────────────────────────────
 
@@ -458,52 +458,6 @@ export function getQualifiedSignals(snapshots: TimeframeSignalSnapshot[]): Quali
   return qualified.sort((a, b) => b.confidence - a.confidence)
 }
 
-// ─── Heatmap Signal Derivation ──────────────────────────────────────────────
-
-export function deriveSignalsFromHeatmap(snapshot: HeatmapSnapshot | null): HeatmapSignalDerivation {
-  if (!snapshot) {
-    return {
-      marketSentiment: 'neutral',
-      sentimentScore: 0,
-      volumeProfile: 'stable',
-      dominanceShift: 'balanced',
-      fearGreedBias: null,
-      correlationStrength: 0,
-      signalConfidence: 0,
-    }
-  }
-
-  const avgChange = snapshot.coins.length > 0
-    ? snapshot.coins.reduce((sum, c) => sum + c.change24h, 0) / snapshot.coins.length
-    : 0
-
-  const sentimentScore = Math.max(-1, Math.min(1, avgChange / 10))
-  const marketSentiment: 'bullish' | 'bearish' | 'neutral' =
-    sentimentScore > 0.1 ? 'bullish' : sentimentScore < -0.1 ? 'bearish' : 'neutral'
-
-  const dominanceShift: 'btc-leading' | 'alt-leading' | 'balanced' =
-    snapshot.btcDominance > 50 ? 'btc-leading' : snapshot.btcDominance < 40 ? 'alt-leading' : 'balanced'
-
-  let fearGreedBias: HeatmapSignalDerivation['fearGreedBias'] = null
-  if (snapshot.fearGreedIndex !== null) {
-    const fg = snapshot.fearGreedIndex
-    if (fg <= 15) fearGreedBias = 'extreme-fear'
-    else if (fg <= 35) fearGreedBias = 'fear'
-    else if (fg <= 65) fearGreedBias = 'neutral'
-    else if (fg <= 85) fearGreedBias = 'greed'
-    else fearGreedBias = 'extreme-greed'
-  }
-
-  return {
-    marketSentiment,
-    sentimentScore,
-    volumeProfile: 'stable',
-    dominanceShift,
-    fearGreedBias,
-    correlationStrength: Math.abs(sentimentScore),
-    signalConfidence: Math.abs(sentimentScore) * 0.6,
-  }
-}
 
 // ─── Markov Prior from Candles ───────────────────────────────────────────────
 
