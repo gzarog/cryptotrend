@@ -232,6 +232,21 @@ export function LineChart({
           <path key={p.name} d={p.path} stroke={p.color} strokeWidth={1.5} fill="none" strokeLinecap="round" />
         ))}
 
+        {/* Latest value labels at right edge */}
+        {allSeries.map((s) => {
+          const lastVal = [...s.data].reverse().find((v): v is number => v !== null)
+          if (lastVal === undefined) return null
+          const y = yScale(lastVal)
+          return (
+            <g key={`latest-${s.name}`}>
+              <circle cx={width - PADDING} cy={y} r={3} fill={s.color} />
+              <text x={width - PADDING + 6} y={y + 4} fill={s.color} fontSize={10} fontWeight={600}>
+                {formatValue(lastVal)}
+              </text>
+            </g>
+          )
+        })}
+
         {/* Markers */}
         {markers?.map((m, i) => {
           const x = xScale(m.index)
