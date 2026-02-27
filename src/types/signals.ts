@@ -57,33 +57,6 @@ export type TrendBias = {
   adxStrength: 'strong' | 'moderate' | 'weak'
 }
 
-export type SignalPreset = 'balanced' | 'scalper' | 'swing'
-
-export type SignalPresetConfig = {
-  name: string
-  label: string
-  description: string
-  timeframeWeights: Record<string, number>
-  rsiWeight: number
-  macdWeight: number
-  stochWeight: number
-  adxWeight: number
-  markovWeight: number
-}
-
-export type ExpertSignalResult = {
-  preset: SignalPreset
-  direction: SignalDirection
-  strength: SignalStrength
-  confidence: number
-  label: string
-  fusionScore: number
-  timeframeBreakdown: Record<string, {
-    direction: SignalDirection
-    weight: number
-    contribution: number
-  }>
-}
 
 export type QualifiedSignal = {
   timeframe: string
