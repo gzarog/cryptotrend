@@ -5,11 +5,10 @@ import { DashboardView } from '../components/DashboardView'
 import { NotificationDialog } from '../components/NotificationDialog'
 import { useMarketData, useMultiFrameMarketData } from '../hooks/useMarketData'
 import { calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI, calculateMACD, calculateADX, calculateATR } from '../lib/indicators'
-import { deriveCombinedSignal, deriveTimeframeSnapshots, getMultiTimeframeSignal, getQualifiedSignals, deriveTrendBias } from '../lib/signals'
-import { deriveQuantumCompositeSignal, calculateMarkovPrior, calculateMultiTimeframeMarkovPriors } from '../lib/quantum'
+import { deriveCombinedSignal, deriveTimeframeSnapshots, getMultiTimeframeSignal, getQualifiedSignals, deriveTrendBias, calculateMarkovPrior, calculateMultiTimeframeMarkovPriors } from '../lib/signals'
 import { createNotificationId, showBrowserNotification } from '../lib/notifications'
-import type { MomentumNotification, MovingAverageCrossNotification, QuantumPhaseNotification, MomentumComputation } from '../types/app'
-import type { TimeframeSignalSnapshot, QuantumCompositeSignal } from '../types/signals'
+import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation } from '../types/app'
+import type { TimeframeSignalSnapshot } from '../types/signals'
 
 // ─── Timeframe-Adaptive Settings ────────────────────────────────────────────
 
@@ -123,9 +122,7 @@ const Index = () => {
   // Notification state
   const [momentumNotifications, setMomentumNotifications] = useState<MomentumNotification[]>([])
   const [crossNotifications, setCrossNotifications] = useState<MovingAverageCrossNotification[]>([])
-  const [quantumNotifications, setQuantumNotifications] = useState<QuantumPhaseNotification[]>([])
   const prevCrossRef = useRef<'golden' | 'death' | null>(null)
-  const prevQuantumPhaseRef = useRef<string | null>(null)
 
   const refreshInterval = parseFloat(refreshSelection) * 60 * 1000
 
@@ -255,13 +252,6 @@ const Index = () => {
     [snapshots]
   )
 
-  // ─── Quantum Analysis ────────────────────────────────────────────────────
-
-  const quantumSignal = useMemo<QuantumCompositeSignal | null>(() => {
-    if (!candles || candles.length < 60) return null
-    return deriveQuantumCompositeSignal(candles)
-  }, [candles])
-
   // ─── MA Cross Detection ───────────────────────────────────────────────────
 
   useEffect(() => {
@@ -317,45 +307,17 @@ const Index = () => {
     }
   }, [latestRSI, latestStochD, symbol, timeframe])
 
-  // ─── Quantum Phase Notification ───────────────────────────────────────────
-
-  useEffect(() => {
-    if (!quantumSignal || quantumSignal.confidence < 0.3) return
-    const phaseKey = `${quantumSignal.phase}-${quantumSignal.direction}`
-    if (phaseKey === prevQuantumPhaseRef.current) return
-    prevQuantumPhaseRef.current = phaseKey
-
-    const notif: QuantumPhaseNotification = {
-      id: createNotificationId(),
-      symbol,
-      phase: quantumSignal.phase,
-      phaseLabel: quantumSignal.phaseLabel,
-      confidence: quantumSignal.confidence,
-      compositeScore: quantumSignal.compositeScore,
-      flipThreshold: quantumSignal.flipThreshold,
-      direction: quantumSignal.direction,
-      triggeredAt: Date.now(),
-    }
-    setQuantumNotifications(prev => [notif, ...prev].slice(0, 5))
-    showBrowserNotification(
-      `⚛ ${quantumSignal.phaseLabel} Phase — ${symbol}`,
-      `Direction: ${quantumSignal.direction} | Confidence: ${(quantumSignal.confidence * 100).toFixed(0)}%`
-    )
-  }, [quantumSignal, symbol])
-
   // Reset detection refs on symbol change (keep notification history)
   useEffect(() => {
     prevCrossRef.current = null
-    prevQuantumPhaseRef.current = null
   }, [symbol])
 
   const allNotifIds = useMemo(() => {
     const ids: string[] = []
     for (const n of momentumNotifications) ids.push(n.id)
     for (const n of crossNotifications) ids.push(n.id)
-    for (const n of quantumNotifications) ids.push(n.id)
     return ids
-  }, [momentumNotifications, crossNotifications, quantumNotifications])
+  }, [momentumNotifications, crossNotifications])
 
   const unreadCount = useMemo(
     () => allNotifIds.filter(id => !readNotifIds.has(id)).length,
@@ -373,7 +335,6 @@ const Index = () => {
   const handleClearAll = useCallback(() => {
     setMomentumNotifications([])
     setCrossNotifications([])
-    setQuantumNotifications([])
     setReadNotifIds(new Set())
   }, [])
 
@@ -385,7 +346,6 @@ const Index = () => {
       onCloseNotifPanel={() => setShowNotifPanel(false)}
       momentumNotifications={momentumNotifications}
       crossNotifications={crossNotifications}
-      quantumNotifications={quantumNotifications}
       readNotifIds={readNotifIds}
       onMarkRead={handleMarkRead}
       onMarkAllRead={handleMarkAllRead}
@@ -433,11 +393,9 @@ const Index = () => {
         latestMACDHist={latestMACDHist}
         momentumNotifications={momentumNotifications}
         crossNotifications={crossNotifications}
-        quantumNotifications={quantumNotifications}
         snapshots={snapshots}
         qualifiedSignals={qualifiedSignals}
         multiTfSignal={multiTfSignal}
-        quantumSignal={quantumSignal}
         latestADX={latestADX}
       />
 

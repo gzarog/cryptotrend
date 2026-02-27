@@ -1,8 +1,7 @@
-import type { TimeframeSignalSnapshot, QualifiedSignal, MultiTimeframeSignal, QuantumCompositeSignal } from '../../types/signals'
+import type { TimeframeSignalSnapshot, QualifiedSignal, MultiTimeframeSignal } from '../../types/signals'
 import { TimeframeOverviewCard } from './TimeframeOverviewCard'
 import { TrendBiasBreakdown } from './TrendBiasBreakdown'
 import { SignalHighlights } from './SignalHighlights'
-import { QuantumPredictionPanel } from './QuantumPredictionPanel'
 import { MultiTimeframeSummary } from './MultiTimeframeSummary'
 import { TIMEFRAME_ORDER } from './constants'
 
@@ -10,10 +9,9 @@ type Props = {
   snapshots: TimeframeSignalSnapshot[]
   qualifiedSignals: QualifiedSignal[]
   multiTfSignal: MultiTimeframeSignal | null
-  quantumSignal: QuantumCompositeSignal | null
 }
 
-export function SignalsPanel({ snapshots, qualifiedSignals, multiTfSignal, quantumSignal }: Props) {
+export function SignalsPanel({ snapshots, qualifiedSignals, multiTfSignal }: Props) {
   const sortedSnapshots = [...snapshots].sort(
     (a, b) => TIMEFRAME_ORDER.indexOf(a.timeframe) - TIMEFRAME_ORDER.indexOf(b.timeframe)
   )
@@ -45,9 +43,6 @@ export function SignalsPanel({ snapshots, qualifiedSignals, multiTfSignal, quant
 
       {/* Qualified Signal Highlights */}
       <SignalHighlights signals={qualifiedSignals} />
-
-      {/* Quantum Prediction */}
-      <QuantumPredictionPanel signal={quantumSignal} />
     </div>
   )
 }

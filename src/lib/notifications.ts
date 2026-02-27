@@ -8,7 +8,7 @@ export type AppNotification = {
   title: string
   body: string
   timestamp: number
-  type: 'momentum' | 'cross' | 'quantum' | 'system'
+  type: 'momentum' | 'cross' | 'system'
   read: boolean
 }
 

@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { MomentumNotification, MovingAverageCrossNotification, QuantumPhaseNotification } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification } from '../types/app'
 
 export type UnifiedNotification = {
   id: string
-  type: 'momentum' | 'cross' | 'quantum'
+  type: 'momentum' | 'cross'
   title: string
   body: string
   symbol: string
@@ -12,14 +12,13 @@ export type UnifiedNotification = {
   icon: string
 }
 
-type FilterType = 'all' | 'momentum' | 'cross' | 'quantum'
+type FilterType = 'all' | 'momentum' | 'cross'
 
 type Props = {
   open: boolean
   onClose: () => void
   momentumNotifications: MomentumNotification[]
   crossNotifications: MovingAverageCrossNotification[]
-  quantumNotifications: QuantumPhaseNotification[]
   readIds: Set<string>
   onMarkRead: (id: string) => void
   onMarkAllRead: () => void
@@ -30,7 +29,6 @@ type Props = {
 function unify(
   momentum: MomentumNotification[],
   cross: MovingAverageCrossNotification[],
-  quantum: QuantumPhaseNotification[]
 ): UnifiedNotification[] {
   const items: UnifiedNotification[] = []
 
@@ -60,19 +58,6 @@ function unify(
     })
   }
 
-  for (const n of quantum) {
-    items.push({
-      id: n.id,
-      type: 'quantum',
-      title: `${n.phaseLabel} Phase`,
-      body: `${n.direction} • ${(n.confidence * 100).toFixed(0)}% confidence`,
-      symbol: n.symbol,
-      triggeredAt: n.triggeredAt,
-      accentClass: n.direction === 'bullish' ? 'border-l-green-500' : n.direction === 'bearish' ? 'border-l-red-500' : 'border-l-gray-500',
-      icon: '⚛',
-    })
-  }
-
   return items.sort((a, b) => b.triggeredAt - a.triggeredAt)
 }
 
@@ -92,7 +77,6 @@ const FILTER_TABS: { key: FilterType; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'momentum', label: 'Momentum' },
   { key: 'cross', label: 'MA Cross' },
-  { key: 'quantum', label: 'Quantum' },
 ]
 
 export function NotificationPanel({
@@ -100,7 +84,6 @@ export function NotificationPanel({
   onClose,
   momentumNotifications,
   crossNotifications,
-  quantumNotifications,
   readIds,
   onMarkRead,
   onMarkAllRead,
@@ -126,7 +109,7 @@ export function NotificationPanel({
 
   if (!open) return null
 
-  const allItems = unify(momentumNotifications, crossNotifications, quantumNotifications)
+  const allItems = unify(momentumNotifications, crossNotifications)
   const filteredItems = filter === 'all' ? allItems : allItems.filter(i => i.type === filter)
   const unreadCount = allItems.filter(i => !readIds.has(i.id)).length
 
@@ -134,7 +117,6 @@ export function NotificationPanel({
     all: allItems.length,
     momentum: allItems.filter(i => i.type === 'momentum').length,
     cross: allItems.filter(i => i.type === 'cross').length,
-    quantum: allItems.filter(i => i.type === 'quantum').length,
   }
 
   return (

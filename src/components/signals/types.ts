@@ -1,1 +1,1 @@
-export { type SignalDirection, type SignalStrength, type CombinedSignal, type TimeframeSignalSnapshot, type QualifiedSignal, type ExpertSignalResult, type QuantumCompositeSignal } from '../../types/signals'
+export { type SignalDirection, type SignalStrength, type CombinedSignal, type TimeframeSignalSnapshot, type QualifiedSignal, type ExpertSignalResult } from '../../types/signals'
