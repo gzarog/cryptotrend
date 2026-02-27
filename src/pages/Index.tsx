@@ -115,7 +115,7 @@ const Index = () => {
   const [symbol, setSymbol] = useState('BTCUSDT')
   const [timeframe, setTimeframe] = useState('15')
   const [refreshSelection, setRefreshSelection] = useState('1')
-  const [barLimit, setBarLimit] = useState(200)
+  const [barLimit, setBarLimit] = useState(400)
   const [showNotifDialog, setShowNotifDialog] = useState(false)
   const [showNotifPanel, setShowNotifPanel] = useState(false)
   const [readNotifIds, setReadNotifIds] = useState<Set<string>>(new Set())
