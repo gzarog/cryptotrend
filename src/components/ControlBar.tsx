@@ -62,22 +62,16 @@ export function ControlBar({
           )}
         </div>
 
-        {/* Timeframe Pills */}
-        <div className="flex gap-1 bg-black/20 rounded-lg p-1">
+        {/* Timeframe Selector */}
+        <select
+          className="glass-input text-xs py-1.5 min-w-[80px]"
+          value={timeframe}
+          onChange={(e) => onTimeframeChange(e.target.value)}
+        >
           {TIMEFRAMES.map((tf) => (
-            <button
-              key={tf.value}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                tf.value === timeframe
-                  ? 'bg-primary/20 text-primary shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
-              }`}
-              onClick={() => onTimeframeChange(tf.value)}
-            >
-              {tf.label}
-            </button>
+            <option key={tf.value} value={tf.value}>{tf.label}</option>
           ))}
-        </div>
+        </select>
 
         {/* Refresh Interval */}
         <div className="flex items-center gap-2 ml-auto">
