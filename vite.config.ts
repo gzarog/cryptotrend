@@ -22,6 +22,17 @@ export default defineConfig(({ mode }) => ({
       workbox: {
         navigateFallbackDenylist: [/^\/~oauth/],
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        navigateFallback: "/offline.html",
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/api\./,
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "api-cache",
+              networkTimeoutSeconds: 5,
+            },
+          },
+        ],
       },
       manifest: {
         name: "CryptoTrendNotify – Crypto Momentum Dashboard",
