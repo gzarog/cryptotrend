@@ -134,7 +134,7 @@ const Index = () => {
   // Notification state
   const [momentumNotifications, setMomentumNotifications] = useState<MomentumNotification[]>([])
   const [crossNotifications, setCrossNotifications] = useState<MovingAverageCrossNotification[]>([])
-  const prevCrossRef = useRef<'golden' | 'death' | null>(null)
+  const prevCrossRef = useRef<Record<string, 'golden' | 'death' | null>>({})
 
   const refreshInterval = parseFloat(refreshSelection) * 60 * 1000
 
@@ -260,64 +260,72 @@ const Index = () => {
   const qualifiedSignals = useMemo(() => getQualifiedSignals(snapshots), [snapshots])
 
 
-  // ─── MA Cross Detection ───────────────────────────────────────────────────
+  // ─── Multi-TF MA Cross Detection ─────────────────────────────────────────
 
   useEffect(() => {
-    const cross = detectMACross(ema10, ema50, prevCrossRef.current)
-    if (cross && latestCandle) {
-      prevCrossRef.current = cross.direction
-      const notif: MovingAverageCrossNotification = {
-        id: createNotificationId(),
-        symbol,
-        timeframe,
-        timeframeLabel: TF_LABELS[timeframe] ?? timeframe,
-        pairLabel: 'EMA 10 / EMA 50',
-        direction: cross.direction,
-        intensity: cross.direction === 'golden' ? 'green' : 'yellow',
-        price: latestCandle.close,
-        triggeredAt: Date.now(),
-      }
-      setCrossNotifications(prev => [notif, ...prev].slice(0, 10))
-      showBrowserNotification(
-        `${cross.direction === 'golden' ? '🟡 Golden' : '🟣 Death'} Cross — ${symbol}`,
-        `EMA 10/50 ${cross.direction} cross at $${latestCandle.close.toLocaleString()}`
-      )
-    }
-  }, [ema10, ema50, symbol, timeframe, latestCandle])
-
-  // ─── Momentum Detection ───────────────────────────────────────────────────
-
-  useEffect(() => {
-    const momentum = detectMomentum(latestRSI, latestStochD, timeframe, TF_LABELS[timeframe] ?? timeframe)
-    if (momentum) {
-      const notif: MomentumNotification = {
-        id: createNotificationId(),
-        symbol,
-        direction: momentum.direction,
-        intensity: momentum.intensity,
-        label: `${momentum.direction === 'long' ? '🟢' : '🔴'} ${momentum.direction.toUpperCase()} Momentum`,
-        timeframeSummary: TF_LABELS[timeframe] ?? timeframe,
-        rsiSummary: latestRSI?.toFixed(1) ?? '—',
-        stochasticSummary: latestStochD?.toFixed(1) ?? '—',
-        readings: [],
-        triggeredAt: Date.now(),
-      }
-      setMomentumNotifications(prev => {
-        // Dedupe by direction within 60s
-        const recent = prev.filter(p => Date.now() - p.triggeredAt < 60000 && p.direction === momentum.direction)
-        if (recent.length > 0) return prev
+    for (const comp of computations) {
+      if (!comp.candles.length || !comp.close) continue
+      const c = comp.candles.map(x => x.close)
+      const tfEma10 = calculateEMA(c, 10)
+      const tfEma50 = calculateEMA(c, 50)
+      const prevState = prevCrossRef.current[comp.timeframe] ?? null
+      const cross = detectMACross(tfEma10, tfEma50, prevState)
+      if (cross) {
+        prevCrossRef.current = { ...prevCrossRef.current, [comp.timeframe]: cross.direction }
+        const notif: MovingAverageCrossNotification = {
+          id: createNotificationId(),
+          symbol,
+          timeframe: comp.timeframe,
+          timeframeLabel: comp.timeframeLabel,
+          pairLabel: 'EMA 10 / EMA 50',
+          direction: cross.direction,
+          intensity: cross.direction === 'golden' ? 'green' : 'yellow',
+          price: comp.close,
+          triggeredAt: Date.now(),
+        }
+        setCrossNotifications(prev => [notif, ...prev].slice(0, 30))
         showBrowserNotification(
-          `${momentum.direction === 'long' ? '🟢' : '🔴'} ${momentum.direction.toUpperCase()} Momentum — ${symbol}`,
-          `RSI: ${latestRSI?.toFixed(1) ?? '—'} | Stoch D: ${latestStochD?.toFixed(1) ?? '—'} (${TF_LABELS[timeframe] ?? timeframe})`
+          `${cross.direction === 'golden' ? '🟡 Golden' : '🟣 Death'} Cross — ${symbol} (${comp.timeframeLabel})`,
+          `EMA 10/50 ${cross.direction} cross at $${comp.close.toLocaleString()}`
         )
-        return [notif, ...prev].slice(0, 10)
-      })
+      }
     }
-  }, [latestRSI, latestStochD, symbol, timeframe])
+  }, [computations, symbol])
 
-  // Reset detection refs on symbol change (keep notification history)
+  // ─── Multi-TF Momentum Detection ──────────────────────────────────────────
+
   useEffect(() => {
-    prevCrossRef.current = null
+    for (const comp of computations) {
+      const momentum = detectMomentum(comp.rsi, comp.stochD, comp.timeframe, comp.timeframeLabel)
+      if (momentum) {
+        const notif: MomentumNotification = {
+          id: createNotificationId(),
+          symbol,
+          direction: momentum.direction,
+          intensity: momentum.intensity,
+          label: `${momentum.direction === 'long' ? '🟢' : '🔴'} ${momentum.direction.toUpperCase()} Momentum`,
+          timeframeSummary: comp.timeframeLabel,
+          rsiSummary: comp.rsi?.toFixed(1) ?? '—',
+          stochasticSummary: comp.stochD?.toFixed(1) ?? '—',
+          readings: [],
+          triggeredAt: Date.now(),
+        }
+        setMomentumNotifications(prev => {
+          const recent = prev.filter(p => Date.now() - p.triggeredAt < 60000 && p.direction === momentum.direction && p.timeframeSummary === comp.timeframeLabel)
+          if (recent.length > 0) return prev
+          showBrowserNotification(
+            `${momentum.direction === 'long' ? '🟢' : '🔴'} ${momentum.direction.toUpperCase()} Momentum — ${symbol} (${comp.timeframeLabel})`,
+            `RSI: ${comp.rsi?.toFixed(1) ?? '—'} | Stoch D: ${comp.stochD?.toFixed(1) ?? '—'}`
+          )
+          return [notif, ...prev].slice(0, 30)
+        })
+      }
+    }
+  }, [computations, symbol])
+
+  // Reset detection refs on symbol change
+  useEffect(() => {
+    prevCrossRef.current = {}
   }, [symbol])
 
   const allNotifIds = useMemo(() => {
