@@ -277,6 +277,16 @@ export function LineChart({
           />
         )}
       </svg>
+      {allSeries.length > 1 && (
+        <div className="flex items-center justify-center gap-4 mt-2">
+          {allSeries.map((s) => (
+            <div key={s.name} className="flex items-center gap-1.5">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: s.color }} />
+              <span className="text-[11px] text-muted-foreground">{s.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
