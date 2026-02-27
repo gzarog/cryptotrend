@@ -8,49 +8,9 @@ import type {
   TimeframeSignalSnapshot,
   TrendBias,
   QualifiedSignal,
-  SignalPreset,
-  SignalPresetConfig,
-  ExpertSignalResult,
 } from '../types/signals'
 
 
-// ─── Signal Presets ─────────────────────────────────────────────────────────
-
-export const SIGNAL_PRESETS: Record<SignalPreset, SignalPresetConfig> = {
-  balanced: {
-    name: 'balanced',
-    label: 'Balanced',
-    description: 'Equal weight across all timeframes and indicators',
-    timeframeWeights: { '5': 0.1, '15': 0.15, '30': 0.15, '60': 0.2, '120': 0.15, '240': 0.15, '360': 0.1 },
-    rsiWeight: 0.25,
-    macdWeight: 0.25,
-    stochWeight: 0.25,
-    adxWeight: 0.25,
-    markovWeight: 0.15,
-  },
-  scalper: {
-    name: 'scalper',
-    label: 'Scalper',
-    description: 'Favors short timeframes for quick entries',
-    timeframeWeights: { '5': 0.3, '15': 0.25, '30': 0.2, '60': 0.15, '120': 0.05, '240': 0.03, '360': 0.02 },
-    rsiWeight: 0.3,
-    macdWeight: 0.15,
-    stochWeight: 0.35,
-    adxWeight: 0.2,
-    markovWeight: 0.1,
-  },
-  swing: {
-    name: 'swing',
-    label: 'Swing',
-    description: 'Favors higher timeframes for trend-following',
-    timeframeWeights: { '5': 0.02, '15': 0.05, '30': 0.08, '60': 0.15, '120': 0.2, '240': 0.25, '360': 0.25 },
-    rsiWeight: 0.2,
-    macdWeight: 0.3,
-    stochWeight: 0.15,
-    adxWeight: 0.35,
-    markovWeight: 0.2,
-  },
-}
 
 // ─── Direction & Strength Helpers ───────────────────────────────────────────
 
@@ -334,87 +294,6 @@ function getDominantDirection(snapshots: TimeframeSignalSnapshot[]): SignalDirec
   return 'neutral'
 }
 
-// ─── Expert Signal ──────────────────────────────────────────────────────────
-
-export function deriveExpertSignal(
-  snapshots: TimeframeSignalSnapshot[],
-  preset: SignalPreset
-): ExpertSignalResult {
-  const config = SIGNAL_PRESETS[preset]
-  let fusionScore = 0
-  let totalWeight = 0
-
-  const timeframeBreakdown: Record<string, { direction: SignalDirection; weight: number; contribution: number }> = {}
-
-  for (const snap of snapshots) {
-    const tfWeight = config.timeframeWeights[snap.timeframe] ?? 0.1
-
-    let indicatorScore = 0
-    let indicatorWeight = 0
-
-    // RSI contribution
-    const rsiSig = snap.signal.signals.find(s => s.source === 'rsi')
-    if (rsiSig) {
-      const dir = rsiSig.direction === 'long' ? 1 : rsiSig.direction === 'short' ? -1 : 0
-      indicatorScore += dir * rsiSig.confidence * config.rsiWeight
-      indicatorWeight += config.rsiWeight
-    }
-
-    // MACD contribution
-    const macdSig = snap.signal.signals.find(s => s.source === 'macd')
-    if (macdSig) {
-      const dir = macdSig.direction === 'long' ? 1 : macdSig.direction === 'short' ? -1 : 0
-      indicatorScore += dir * macdSig.confidence * config.macdWeight
-      indicatorWeight += config.macdWeight
-    }
-
-    // Stoch contribution
-    const stochSig = snap.signal.signals.find(s => s.source === 'stoch')
-    if (stochSig) {
-      const dir = stochSig.direction === 'long' ? 1 : stochSig.direction === 'short' ? -1 : 0
-      indicatorScore += dir * stochSig.confidence * config.stochWeight
-      indicatorWeight += config.stochWeight
-    }
-
-    // ADX contribution
-    const adxSig = snap.signal.signals.find(s => s.source === 'adx')
-    if (adxSig) {
-      const dir = adxSig.direction === 'long' ? 1 : adxSig.direction === 'short' ? -1 : 0
-      indicatorScore += dir * adxSig.confidence * config.adxWeight
-      indicatorWeight += config.adxWeight
-    }
-
-    // Markov prior
-    indicatorScore += snap.signal.markovPrior * config.markovWeight
-    indicatorWeight += config.markovWeight
-
-    const normalizedIndicator = indicatorWeight > 0 ? indicatorScore / indicatorWeight : 0
-    const contribution = normalizedIndicator * tfWeight
-
-    fusionScore += contribution
-    totalWeight += tfWeight
-
-    timeframeBreakdown[snap.timeframe] = {
-      direction: scoreToDirection(normalizedIndicator),
-      weight: tfWeight,
-      contribution,
-    }
-  }
-
-  const normalizedFusion = totalWeight > 0 ? fusionScore / totalWeight : 0
-  const confidence = Math.min(Math.abs(normalizedFusion), 1)
-  const direction = scoreToDirection(normalizedFusion)
-
-  return {
-    preset,
-    direction,
-    strength: confidenceToStrength(confidence),
-    confidence,
-    label: `${config.label}: ${directionLabel(direction)} (${(confidence * 100).toFixed(0)}%)`,
-    fusionScore: normalizedFusion,
-    timeframeBreakdown,
-  }
-}
 
 // ─── Qualified Signals ──────────────────────────────────────────────────────
 

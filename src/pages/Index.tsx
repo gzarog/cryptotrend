@@ -396,7 +396,6 @@ const Index = () => {
         snapshots={snapshots}
         qualifiedSignals={qualifiedSignals}
         multiTfSignal={multiTfSignal}
-        latestADX={latestADX}
       />
 
       {isError && (

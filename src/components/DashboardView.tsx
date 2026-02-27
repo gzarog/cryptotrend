@@ -4,8 +4,6 @@ import { LineChart } from './LineChart'
 import { MarketSummary } from './MarketSummary'
 import { IndicatorGrid } from './IndicatorGrid'
 import { SignalsPanel } from './signals/SignalsPanel'
-import { ExpertSignalsPanel } from './ExpertSignalsPanel'
-import { HedgingCalculatorPanel } from './HedgingCalculatorPanel'
 import { ChartSkeleton } from './skeletons'
 
 type Props = {
@@ -49,8 +47,6 @@ type Props = {
   qualifiedSignals: QualifiedSignal[]
   multiTfSignal: MultiTimeframeSignal | null
 
-  // Hedging
-  latestADX: number | null
 }
 
 const RSI_GUIDES = [
@@ -76,7 +72,6 @@ export function DashboardView(props: Props) {
     latestMACDLine, latestMACDSignal, latestMACDHist,
     momentumNotifications, crossNotifications,
     snapshots, qualifiedSignals, multiTfSignal,
-    latestADX,
   } = props
 
   return (
@@ -197,20 +192,6 @@ export function DashboardView(props: Props) {
         </div>
       )}
 
-      {/* Expert Signals & Hedging side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {snapshots.length > 0 && <ExpertSignalsPanel snapshots={snapshots} />}
-        {candles.length > 0 && (
-          <HedgingCalculatorPanel
-            candles={candles}
-            currentPrice={price ?? 0}
-            rsi={latestRSI}
-            macdHistogram={latestMACDHist}
-            adx={latestADX}
-            stochK={latestStochK}
-          />
-        )}
-      </div>
     </div>
   )
 }
