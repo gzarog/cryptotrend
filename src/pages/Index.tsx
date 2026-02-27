@@ -117,8 +117,16 @@ const Index = () => {
     setSymbol(s)
     localStorage.setItem('selected-symbol', s)
   }, [])
-  const [timeframe, setTimeframe] = useState('15')
-  const [refreshSelection, setRefreshSelection] = useState('1')
+  const [timeframe, setTimeframe] = useState(() => localStorage.getItem('selected-timeframe') || '15')
+  const handleTimeframeChange = useCallback((t: string) => {
+    setTimeframe(t)
+    localStorage.setItem('selected-timeframe', t)
+  }, [])
+  const [refreshSelection, setRefreshSelection] = useState(() => localStorage.getItem('selected-refresh') || '1')
+  const handleRefreshChange = useCallback((r: string) => {
+    setRefreshSelection(r)
+    localStorage.setItem('selected-refresh', r)
+  }, [])
   const [barLimit, setBarLimit] = useState(400)
   const [showNotifDialog, setShowNotifDialog] = useState(false)
   const [showNotifPanel, setShowNotifPanel] = useState(false)
@@ -356,9 +364,9 @@ const Index = () => {
         symbol={symbol}
         onSymbolChange={handleSymbolChange}
         timeframe={timeframe}
-        onTimeframeChange={setTimeframe}
+        onTimeframeChange={handleTimeframeChange}
         refreshSelection={refreshSelection}
-        onRefreshSelectionChange={setRefreshSelection}
+        onRefreshSelectionChange={handleRefreshChange}
         barLimit={barLimit}
         onBarLimitChange={setBarLimit}
         isFetching={isFetching}
