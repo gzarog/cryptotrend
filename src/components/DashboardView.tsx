@@ -1,6 +1,7 @@
 import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, Candle } from '../types/app'
 import type { TimeframeSignalSnapshot, QualifiedSignal, MultiTimeframeConfluence } from '../types/signals'
 import type { RiskLevel } from '../lib/risk'
+import type { IchimokuResult, FibonacciResult, CVDResult } from '../lib/indicators'
 import { LineChart } from './LineChart'
 import { MarketSummary } from './MarketSummary'
 import { IndicatorGrid } from './IndicatorGrid'
@@ -73,6 +74,13 @@ type Props = {
   autocorrelation?: number | null
   oiDivergence?: number | null
   volumeSpikeRatio?: number | null
+
+  // Tier 1: Ichimoku, Fibonacci, CVD, Correlation
+  ichimokuResult?: IchimokuResult | null
+  fibResult?: FibonacciResult | null
+  cvdResult?: CVDResult | null
+  btcCorrelation?: number | null
+  ethCorrelation?: number | null
 }
 
 const RSI_GUIDES = [
@@ -111,6 +119,7 @@ export function DashboardView(props: Props) {
     volatilityPercentile, riskLevels, fundingRate,
     hurstExponent, zScore, rSquared,
     kama = [], autocorrelation, oiDivergence, volumeSpikeRatio,
+    ichimokuResult, fibResult, cvdResult, btcCorrelation, ethCorrelation,
   } = props
 
   return (
@@ -270,6 +279,10 @@ export function DashboardView(props: Props) {
         zScore={zScore}
         rSquared={rSquared}
         oiDivergence={oiDivergence}
+        ichimokuTenkan={ichimokuResult?.tenkan[ichimokuResult.tenkan.length - 1] ?? null}
+        ichimokuKijun={ichimokuResult?.kijun[ichimokuResult.kijun.length - 1] ?? null}
+        cvd={cvdResult?.cvd[cvdResult.cvd.length - 1] ?? null}
+        cvdEma={cvdResult?.cvdEma[cvdResult.cvdEma.length - 1] ?? null}
       />
 
       {/* Risk Levels */}
@@ -298,7 +311,7 @@ export function DashboardView(props: Props) {
         </div>
       )}
 
-      {/* Price Chart with BB, Supertrend, VWAP overlays */}
+      {/* Price Chart with BB, Supertrend, VWAP, Ichimoku overlays */}
       {isLoading ? <ChartSkeleton height={300} /> : (
         <div className="mb-6">
           <LineChart
@@ -314,7 +327,12 @@ export function DashboardView(props: Props) {
               ...(supertrend.some(v => v !== null) ? [{ name: 'Supertrend', data: supertrend, color: latestSTDir === 1 ? 'hsl(160 84% 39%)' : 'hsl(0 84% 60%)' }] : []),
               ...(vwap.some(v => v !== null) ? [{ name: 'VWAP', data: vwap, color: 'hsl(190 90% 60%)' }] : []),
               ...(kama.some(v => v !== null) ? [{ name: 'KAMA', data: kama, color: 'hsl(330 70% 60%)' }] : []),
+              ...(ichimokuResult?.senkouA?.some(v => v !== null) ? [{ name: 'Senkou A', data: ichimokuResult.senkouA, color: 'hsl(120 60% 50% / 0.5)' }] : []),
+              ...(ichimokuResult?.senkouB?.some(v => v !== null) ? [{ name: 'Senkou B', data: ichimokuResult.senkouB, color: 'hsl(0 60% 50% / 0.5)' }] : []),
             ]}
+            guideLines={fibResult ? fibResult.levels
+              .filter(l => [0.382, 0.5, 0.618].includes(l.ratio))
+              .map(l => ({ value: l.price, label: l.label, color: 'hsl(42 80% 55% / 0.6)' })) : undefined}
             isLoading={false}
           />
         </div>
@@ -370,6 +388,65 @@ export function DashboardView(props: Props) {
             ]}
             isLoading={isLoading}
           />
+        </div>
+      )}
+
+      {/* CVD Chart */}
+      {cvdResult && cvdResult.cvd.length > 0 && (
+        <div className="mb-6">
+          <LineChart
+            title="Cumulative Volume Delta (CVD)"
+            labels={labels}
+            series={[
+              { name: 'CVD', data: cvdResult.cvd.map(v => v as number | null), color: 'hsl(187 94% 55%)' },
+              ...(cvdResult.cvdEma.some(v => v !== null) ? [{ name: 'CVD EMA', data: cvdResult.cvdEma, color: 'hsl(45 93% 47%)' }] : []),
+            ]}
+            guideLines={[{ value: 0, label: '0', color: 'hsl(215 20% 40%)' }]}
+            isLoading={isLoading}
+          />
+        </div>
+      )}
+
+      {/* Correlation Panel */}
+      {(btcCorrelation !== null || ethCorrelation !== null) && (
+        <div className="glass-panel p-4 mb-6">
+          <h3 className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider">Cross-Asset Correlation</h3>
+          <div className="grid grid-cols-2 gap-4">
+            {btcCorrelation !== null && (
+              <div className="text-center">
+                <div className="text-[10px] text-muted-foreground">vs BTC</div>
+                <div className={`text-lg font-bold ${
+                  btcCorrelation > 0.8 ? 'text-green-400' :
+                  btcCorrelation > 0.5 ? 'text-yellow-400' :
+                  'text-red-400'
+                }`}>
+                  {btcCorrelation.toFixed(3)}
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  {btcCorrelation > 0.8 ? 'Highly correlated' :
+                   btcCorrelation > 0.5 ? 'Moderate' :
+                   btcCorrelation > 0.3 ? 'Weak' : 'Decoupled'}
+                </div>
+              </div>
+            )}
+            {ethCorrelation !== null && (
+              <div className="text-center">
+                <div className="text-[10px] text-muted-foreground">vs ETH</div>
+                <div className={`text-lg font-bold ${
+                  ethCorrelation > 0.8 ? 'text-green-400' :
+                  ethCorrelation > 0.5 ? 'text-yellow-400' :
+                  'text-red-400'
+                }`}>
+                  {ethCorrelation.toFixed(3)}
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  {ethCorrelation > 0.8 ? 'Highly correlated' :
+                   ethCorrelation > 0.5 ? 'Moderate' :
+                   ethCorrelation > 0.3 ? 'Weak' : 'Decoupled'}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

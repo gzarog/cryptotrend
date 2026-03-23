@@ -56,15 +56,20 @@ interface IndicatorGridProps {
   zScore?: number | null
   rSquared?: number | null
   oiDivergence?: number | null
+  ichimokuTenkan?: number | null
+  ichimokuKijun?: number | null
+  cvd?: number | null
+  cvdEma?: number | null
 }
 
 export function IndicatorGrid({
   rsi, stochK, stochD, macdLine, macdSignal, macdHistogram,
   bbPercentB, supertrendDirection, volatilityPercentile,
   hurstExponent, zScore, rSquared, oiDivergence,
+  ichimokuTenkan, ichimokuKijun, cvd, cvdEma,
 }: IndicatorGridProps) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-13 gap-3 mb-6">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
       <IndicatorCard
         title="RSI"
         value={rsi}
@@ -143,6 +148,30 @@ export function IndicatorGrid({
         format={v => v.toFixed(2)}
         color={oiDivergence != null ? (oiDivergence > 0.1 ? 'green' : oiDivergence < -0.1 ? 'red' : 'neutral') : 'neutral'}
         label={oiDivergence != null ? (oiDivergence > 0.1 ? 'Bullish' : oiDivergence < -0.1 ? 'Bearish' : 'Neutral') : undefined}
+      />
+      <IndicatorCard
+        title="Ichimoku"
+        value={ichimokuTenkan !== undefined && ichimokuTenkan !== null && ichimokuKijun !== undefined && ichimokuKijun !== null
+          ? ichimokuTenkan - ichimokuKijun : null}
+        format={v => v > 0 ? 'BULL' : v < 0 ? 'BEAR' : 'FLAT'}
+        color={ichimokuTenkan != null && ichimokuKijun != null
+          ? (ichimokuTenkan > ichimokuKijun ? 'green' : ichimokuTenkan < ichimokuKijun ? 'red' : 'neutral')
+          : 'neutral'}
+        label={ichimokuTenkan != null && ichimokuKijun != null
+          ? (ichimokuTenkan > ichimokuKijun ? 'TK Bullish' : ichimokuTenkan < ichimokuKijun ? 'TK Bearish' : 'TK Flat')
+          : undefined}
+      />
+      <IndicatorCard
+        title="CVD"
+        value={cvd !== undefined && cvd !== null && cvdEma !== undefined && cvdEma !== null
+          ? cvd - cvdEma : null}
+        format={v => v > 0 ? 'BUY' : 'SELL'}
+        color={cvd != null && cvdEma != null
+          ? (cvd > cvdEma ? 'green' : 'red')
+          : 'neutral'}
+        label={cvd != null && cvdEma != null
+          ? (cvd > cvdEma ? 'Buy Pressure' : 'Sell Pressure')
+          : undefined}
       />
     </div>
   )

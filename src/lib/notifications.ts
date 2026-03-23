@@ -125,6 +125,8 @@ export const COOLDOWN_MS: Record<string, number> = {
   '120': 120 * 60 * 1000,
   '240': 240 * 60 * 1000,
   '360': 360 * 60 * 1000,
+  'D': 24 * 60 * 60 * 1000,
+  'W': 7 * 24 * 60 * 60 * 1000,
 }
 
 export function getCooldown(timeframe: string): number {
@@ -134,6 +136,7 @@ export function getCooldown(timeframe: string): number {
 // ─── Notification Priority ──────────────────────────────────────────────────
 
 export function getTimeframePriority(timeframe: string): NotificationPriority {
+  if (timeframe === 'W' || timeframe === 'D') return 'critical'
   const tf = parseInt(timeframe)
   if (tf >= 240) return 'high'
   if (tf >= 60) return 'medium'

@@ -1,4 +1,5 @@
 import type { Candle, MomentumComputation } from '../types/app'
+import type { FibonacciResult } from './indicators'
 import type {
   SignalDirection,
   SignalStrength,
@@ -345,6 +346,110 @@ function derivePatternSignal(candles: Candle[]): TradingSignal {
   }
 }
 
+// ─── Ichimoku Signal ───────────────────────────────────────────────────────
+
+function deriveIchimokuSignal(
+  close: number | null,
+  tenkan: number | null,
+  kijun: number | null,
+  senkouA: number | null,
+  senkouB: number | null
+): TradingSignal {
+  if (close === null || tenkan === null || kijun === null || senkouA === null || senkouB === null) {
+    return { direction: 'neutral', strength: 'none', confidence: 0, label: 'Ichimoku N/A', source: 'ichimoku' }
+  }
+
+  const cloudTop = Math.max(senkouA, senkouB)
+  const cloudBottom = Math.min(senkouA, senkouB)
+
+  let direction: SignalDirection = 'neutral'
+  let confidence = 0
+
+  if (close > cloudTop) {
+    // Price above cloud
+    direction = 'long'
+    confidence = 0.6
+    // TK cross bullish above cloud = strong
+    if (tenkan > kijun) confidence = 0.75
+  } else if (close < cloudBottom) {
+    // Price below cloud
+    direction = 'short'
+    confidence = 0.6
+    // TK cross bearish below cloud = strong
+    if (tenkan < kijun) confidence = 0.75
+  } else {
+    // Inside cloud = neutral
+    confidence = 0.1
+  }
+
+  const tkState = tenkan > kijun ? 'TK Bull' : tenkan < kijun ? 'TK Bear' : 'TK Flat'
+  return {
+    direction,
+    strength: confidenceToStrength(confidence),
+    confidence,
+    label: `Ichimoku ${tkState}`,
+    source: 'ichimoku',
+  }
+}
+
+// ─── Fibonacci Signal ──────────────────────────────────────────────────────
+
+function deriveFibSignal(close: number | null, fibResult: FibonacciResult | null): TradingSignal {
+  if (close === null || fibResult === null) {
+    return { direction: 'neutral', strength: 'none', confidence: 0, label: 'Fib N/A', source: 'fib' }
+  }
+
+  // Check proximity to key fib levels (0.5, 0.618, 0.382)
+  const keyRatios = [0.382, 0.5, 0.618]
+  let nearestDist = Infinity
+  let nearestLabel = ''
+
+  for (const level of fibResult.levels) {
+    if (!keyRatios.includes(level.ratio)) continue
+    const dist = Math.abs(close - level.price) / level.price
+    if (dist < nearestDist) {
+      nearestDist = dist
+      nearestLabel = level.label
+    }
+  }
+
+  if (nearestDist > 0.003) {
+    return { direction: 'neutral', strength: 'none', confidence: 0.1, label: 'Fib away', source: 'fib' }
+  }
+
+  // Near key level = potential reversal zone
+  const direction: SignalDirection = fibResult.direction === 'up' ? 'long' : 'short'
+  const confidence = nearestDist < 0.001 ? 0.5 : 0.4
+
+  return {
+    direction,
+    strength: confidenceToStrength(confidence),
+    confidence,
+    label: `Fib ${nearestLabel}`,
+    source: 'fib',
+  }
+}
+
+// ─── CVD Signal ────────────────────────────────────────────────────────────
+
+function deriveCVDSignal(cvd: number | null, cvdEma: number | null): TradingSignal {
+  if (cvd === null || cvdEma === null) {
+    return { direction: 'neutral', strength: 'none', confidence: 0, label: 'CVD N/A', source: 'cvd' }
+  }
+
+  const direction: SignalDirection = cvd > cvdEma ? 'long' : cvd < cvdEma ? 'short' : 'neutral'
+  const diff = cvdEma !== 0 ? Math.abs(cvd - cvdEma) / Math.abs(cvdEma) : 0
+  const confidence = Math.min(diff * 3, 0.65)
+
+  return {
+    direction,
+    strength: confidenceToStrength(confidence),
+    confidence,
+    label: `CVD ${direction === 'long' ? 'Buying' : 'Selling'}`,
+    source: 'cvd',
+  }
+}
+
 // ─── Regime Weights ─────────────────────────────────────────────────────────
 
 type RegimeWeights = Record<string, number>
@@ -354,6 +459,7 @@ function calculateRegimeWeights(hurst: number | null, adx: number | null, volPct
   const weights: RegimeWeights = {
     rsi: 1.0, stoch: 1.0, macd: 1.0, adx: 1.0, bb: 1.0, supertrend: 1.0,
     funding: 1.0, oi: 1.0, zscore: 1.0, obv: 1.0, vwap: 1.0, pattern: 1.0,
+    ichimoku: 1.0, cvd: 1.0, fib: 1.0,
     'divergence-rsi': 1.0, 'divergence-macd': 1.0,
   }
 
@@ -363,6 +469,7 @@ function calculateRegimeWeights(hurst: number | null, adx: number | null, volPct
       weights.macd *= 1.3
       weights.supertrend *= 1.3
       weights.adx *= 1.2
+      weights.ichimoku *= 1.3
       weights.rsi *= 0.7
       weights.bb *= 0.7
       weights.zscore *= 0.7
@@ -373,6 +480,7 @@ function calculateRegimeWeights(hurst: number | null, adx: number | null, volPct
       weights.zscore *= 1.3
       weights.macd *= 0.7
       weights.supertrend *= 0.7
+      weights.ichimoku *= 0.7
     } else {
       // Random walk: reduce all confidence
       for (const key of Object.keys(weights)) {
@@ -384,6 +492,7 @@ function calculateRegimeWeights(hurst: number | null, adx: number | null, volPct
   // High volatility: boost volume and funding signals
   if (volPct !== null && volPct >= 80) {
     weights.obv *= 1.2
+    weights.cvd *= 1.2
     weights.funding *= 1.3
     weights.oi *= 1.2
   }
@@ -425,7 +534,8 @@ export function deriveTrendBias(comp: MomentumComputation): TrendBias {
 export function deriveCombinedSignal(
   comp: MomentumComputation,
   markovPrior: number = 0,
-  bayesianState?: BayesianState
+  bayesianState?: BayesianState,
+  fibResult?: FibonacciResult | null
 ): CombinedSignal {
   const rsiSignal = deriveRSISignal(comp.rsi)
   const stochSignal = deriveStochSignal(comp.stochK, comp.stochD)
@@ -445,10 +555,14 @@ export function deriveCombinedSignal(
   const obvSignal = deriveOBVSignal(comp.obv, comp.obvEma)
   const vwapSignal = deriveVWAPSignal(comp.close, comp.vwap)
   const patternSignal = derivePatternSignal(comp.candles)
+  const ichimokuSignal = deriveIchimokuSignal(comp.close, comp.ichimokuTenkan, comp.ichimokuKijun, comp.ichimokuSenkouA, comp.ichimokuSenkouB)
+  const cvdSignal = deriveCVDSignal(comp.cvd, comp.cvdEma)
+  const fibSignal = deriveFibSignal(comp.close, fibResult ?? null)
 
   const signals = [
     rsiSignal, stochSignal, macdSignal, adxSignal, bbSignal, stSignal,
     fundingSignal, oiSignal, zScoreSignal, obvSignal, vwapSignal, patternSignal,
+    ichimokuSignal, cvdSignal, fibSignal,
   ]
 
   // Regime-adaptive weights
@@ -494,11 +608,13 @@ export function deriveCombinedSignal(
 export function deriveTimeframeSnapshots(
   computations: MomentumComputation[],
   markovPriors: Record<string, number> = {},
-  bayesianState?: BayesianState
+  bayesianState?: BayesianState,
+  fibResults?: Record<string, FibonacciResult | null>
 ): TimeframeSignalSnapshot[] {
   return computations.map((comp) => {
     const prior = markovPriors[comp.timeframe] ?? 0
-    const signal = deriveCombinedSignal(comp, prior, bayesianState)
+    const fibResult = fibResults?.[comp.timeframe] ?? null
+    const signal = deriveCombinedSignal(comp, prior, bayesianState, fibResult)
     const trendBias = deriveTrendBias(comp)
 
     return {
@@ -532,6 +648,12 @@ export function deriveTimeframeSnapshots(
       autocorrelation: comp.autocorrelation,
       oiDivergence: comp.oiDivergence,
       volumeSpikeRatio: comp.volumeSpikeRatio,
+      ichimokuTenkan: comp.ichimokuTenkan,
+      ichimokuKijun: comp.ichimokuKijun,
+      ichimokuSenkouA: comp.ichimokuSenkouA,
+      ichimokuSenkouB: comp.ichimokuSenkouB,
+      cvd: comp.cvd,
+      cvdEma: comp.cvdEma,
     }
   })
 }
@@ -597,6 +719,15 @@ export function getQualifiedSignals(snapshots: TimeframeSignalSnapshot[]): Quali
       details.push(`OI div ${snap.oiDivergence.toFixed(2)}`)
     }
 
+    if (snap.ichimokuTenkan !== null && snap.ichimokuKijun !== null) {
+      const tkState = snap.ichimokuTenkan > snap.ichimokuKijun ? 'TK Bull' : snap.ichimokuTenkan < snap.ichimokuKijun ? 'TK Bear' : 'TK Flat'
+      details.push(`Ichimoku ${tkState}`)
+    }
+
+    if (snap.cvd !== null && snap.cvdEma !== null) {
+      details.push(`CVD ${snap.cvd > snap.cvdEma ? 'buying' : 'selling'}`)
+    }
+
     qualified.push({
       timeframe: snap.timeframe,
       timeframeLabel: snap.timeframeLabel,
@@ -646,16 +777,64 @@ export function calculateMultiTimeframeMarkovPriors(
   return priors
 }
 
+// ─── Adaptive TF Weights ────────────────────────────────────────────────────
+
+const BASE_TF_WEIGHTS: Record<string, number> = {
+  '5': 1, '15': 1.5, '30': 2, '60': 3, '120': 4, '240': 5, '360': 6, 'D': 7, 'W': 8,
+}
+
+function calculateAdaptiveTFWeights(snapshots: TimeframeSignalSnapshot[]): Record<string, number> {
+  // Calculate average Hurst across available snapshots
+  let hurstSum = 0
+  let hurstCount = 0
+  for (const snap of snapshots) {
+    if (snap.hurstExponent !== null) {
+      hurstSum += snap.hurstExponent
+      hurstCount++
+    }
+  }
+
+  const avgHurst = hurstCount > 0 ? hurstSum / hurstCount : 0.5
+  const weights = { ...BASE_TF_WEIGHTS }
+
+  if (avgHurst > 0.6) {
+    // Trending: boost higher TFs, dampen lower TFs
+    weights['5'] *= 0.8
+    weights['15'] *= 0.8
+    weights['30'] *= 1.0
+    weights['60'] *= 1.1
+    weights['120'] *= 1.3
+    weights['240'] *= 1.3
+    weights['360'] *= 1.3
+    weights['D'] *= 1.3
+    weights['W'] *= 1.3
+  } else if (avgHurst < 0.4) {
+    // Mean-reverting: boost lower TFs, dampen higher TFs
+    weights['5'] *= 1.2
+    weights['15'] *= 1.2
+    weights['30'] *= 1.1
+    weights['60'] *= 1.0
+    weights['120'] *= 0.9
+    weights['240'] *= 0.9
+    weights['360'] *= 0.9
+    weights['D'] *= 0.8
+    weights['W'] *= 0.8
+  }
+
+  return weights
+}
+
 // ─── Multi-Timeframe Confluence ─────────────────────────────────────────────
 
 const TF_WEIGHTS: Record<string, number> = {
-  '5': 1, '15': 1.5, '30': 2, '60': 3, '120': 4, '240': 5, '360': 6,
+  '5': 1, '15': 1.5, '30': 2, '60': 3, '120': 4, '240': 5, '360': 6, 'D': 7, 'W': 8,
 }
 
 export function deriveMultiTimeframeConfluence(
   snapshots: TimeframeSignalSnapshot[],
   bayesianState?: BayesianState
 ): MultiTimeframeConfluence {
+  const adaptiveWeights = calculateAdaptiveTFWeights(snapshots)
   let weightedLong = 0
   let weightedShort = 0
   let totalWeight = 0
@@ -664,7 +843,7 @@ export function deriveMultiTimeframeConfluence(
   let neutralCount = 0
 
   for (const snap of snapshots) {
-    let weight = TF_WEIGHTS[snap.timeframe] ?? 1
+    let weight = adaptiveWeights[snap.timeframe] ?? TF_WEIGHTS[snap.timeframe] ?? 1
 
     // Hurst boost: trending markets get higher TF weight boost
     if (snap.hurstExponent !== null) {

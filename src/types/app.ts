@@ -112,6 +112,17 @@ export type MomentumComputation = {
   autocorrelation: number | null
   oiDivergence: number | null
   volumeSpikeRatio: number | null // latest bar volume / avg, null if no spike
+
+  // Ichimoku
+  ichimokuTenkan: number | null
+  ichimokuKijun: number | null
+  ichimokuSenkouA: number | null
+  ichimokuSenkouB: number | null
+  ichimokuChikou: number | null
+
+  // CVD
+  cvd: number | null
+  cvdEma: number | null
 }
 
 export type SignalNotification = {

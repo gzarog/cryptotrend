@@ -194,6 +194,7 @@ async function fetchBybitOpenInterest(symbol: string, interval: string, limit: n
   const oiIntervalMap: Record<string, string> = {
     '5': '5min', '15': '15min', '30': '30min',
     '60': '1h', '120': '4h', '240': '4h', '360': '4h',
+    'D': '1d', 'W': '1d',
   }
   const oiInterval = oiIntervalMap[interval] ?? '1h'
 
@@ -236,4 +237,44 @@ export function useOpenInterestData(
     enabled,
     placeholderData: (previousData) => previousData,
   })
+}
+
+// ─── Cross-Asset Correlation Data ───────────────────────────────────────────
+
+export function useCorrelationData(
+  symbol: string,
+  timeframe: string,
+  barLimit: number,
+  refreshInterval: number | false,
+  enabled: boolean
+) {
+  const normalizedSymbol = symbol.trim().toUpperCase()
+  const needsBTC = normalizedSymbol !== 'BTCUSDT'
+  const needsETH = normalizedSymbol !== 'ETHUSDT'
+
+  const btcQuery = useQuery<Candle[]>({
+    queryKey: ['bybit-kline', 'BTCUSDT', timeframe, barLimit],
+    queryFn: () => fetchBybitOHLCV('BTCUSDT', timeframe, barLimit),
+    refetchInterval: refreshInterval,
+    refetchIntervalInBackground: true,
+    retry: 1,
+    enabled: enabled && needsBTC,
+    placeholderData: (prev) => prev,
+  })
+
+  const ethQuery = useQuery<Candle[]>({
+    queryKey: ['bybit-kline', 'ETHUSDT', timeframe, barLimit],
+    queryFn: () => fetchBybitOHLCV('ETHUSDT', timeframe, barLimit),
+    refetchInterval: refreshInterval,
+    refetchIntervalInBackground: true,
+    retry: 1,
+    enabled: enabled && needsETH,
+    placeholderData: (prev) => prev,
+  })
+
+  return {
+    btcCandles: needsBTC ? (btcQuery.data ?? []) : [],
+    ethCandles: needsETH ? (ethQuery.data ?? []) : [],
+    isLoading: (needsBTC && btcQuery.isLoading) || (needsETH && ethQuery.isLoading),
+  }
 }

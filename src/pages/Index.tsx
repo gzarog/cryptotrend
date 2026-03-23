@@ -3,7 +3,7 @@ import { MainLayout } from '../layouts/MainLayout'
 import { ControlBar } from '../components/ControlBar'
 import { DashboardView } from '../components/DashboardView'
 import { NotificationDialog } from '../components/NotificationDialog'
-import { useMarketData, useMultiFrameMarketData, useTickerData, useOpenInterestData } from '../hooks/useMarketData'
+import { useMarketData, useMultiFrameMarketData, useTickerData, useOpenInterestData, useCorrelationData } from '../hooks/useMarketData'
 import {
   calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI,
   calculateMACD, calculateADX, calculateATR,
@@ -12,6 +12,7 @@ import {
   calculateHurstExponent, calculateZScore, calculateLinearRegression,
   calculateKAMA, calculateAutocorrelation, detectVolumeSpikes,
   calculateOIDivergence,
+  calculateIchimoku, calculateFibonacciLevels, calculateCVD, calculateCorrelation,
 } from '../lib/indicators'
 import {
   deriveTimeframeSnapshots, getQualifiedSignals,
@@ -35,6 +36,8 @@ const RSI_SETTINGS: Record<string, { period: number; label: string }> = {
   '120': { period: 17, label: '16–18' },
   '240': { period: 20, label: '18–21' },
   '360': { period: 23, label: '21–24' },
+  'D': { period: 14, label: '14' },
+  'W': { period: 14, label: '14' },
 }
 const DEFAULT_RSI = { period: 14, label: '14' }
 
@@ -46,6 +49,8 @@ const STOCH_SETTINGS: Record<string, { rsiLength: number; stochLength: number; k
   '120': { rsiLength: 16, stochLength: 16, kSmoothing: 3, dSmoothing: 3 },
   '240': { rsiLength: 21, stochLength: 21, kSmoothing: 4, dSmoothing: 4 },
   '360': { rsiLength: 24, stochLength: 24, kSmoothing: 4, dSmoothing: 4 },
+  'D': { rsiLength: 14, stochLength: 14, kSmoothing: 3, dSmoothing: 3 },
+  'W': { rsiLength: 14, stochLength: 14, kSmoothing: 3, dSmoothing: 3 },
 }
 const DEFAULT_STOCH = { rsiLength: 14, stochLength: 14, kSmoothing: 3, dSmoothing: 3 }
 
@@ -57,10 +62,12 @@ const MACD_SETTINGS: Record<string, { fast: number; slow: number; signal: number
   '120': { fast: 16, slow: 36, signal: 9 },
   '240': { fast: 20, slow: 40, signal: 9 },
   '360': { fast: 22, slow: 44, signal: 10 },
+  'D': { fast: 12, slow: 26, signal: 9 },
+  'W': { fast: 12, slow: 26, signal: 9 },
 }
 const DEFAULT_MACD = { fast: 12, slow: 26, signal: 9 }
 
-const MULTI_TF_LIST = ['5', '15', '30', '60', '120', '240', '360']
+const MULTI_TF_LIST = ['5', '15', '30', '60', '120', '240', '360', 'D', 'W']
 
 const TF_LABELS: Record<string, string> = {
   '5': '5m', '15': '15m', '30': '30m', '60': '1H',
@@ -210,6 +217,9 @@ const Index = () => {
   // Open Interest data
   const { data: oiData } = useOpenInterestData(symbol, timeframe, refreshInterval, true)
 
+  // Cross-asset correlation data
+  const { btcCandles, ethCandles } = useCorrelationData(symbol, timeframe, barLimit, refreshInterval, true)
+
   const lastUpdated = useMemo(() => {
     if (!candles?.length) return ''
     return LAST_REFRESH_FORMATTER.format(new Date())
@@ -272,6 +282,30 @@ const Index = () => {
     const oiValues = oiData.map(d => d.openInterest)
     return calculateOIDivergence(closes, oiValues)
   }, [closes, oiData])
+
+  // Ichimoku for primary TF
+  const ichimokuResult = useMemo(() => candles ? calculateIchimoku(candles) : null, [candles])
+
+  // Fibonacci for primary TF
+  const fibResult = useMemo(() => candles ? calculateFibonacciLevels(candles) : null, [candles])
+
+  // CVD for primary TF
+  const cvdResult = useMemo(() => candles ? calculateCVD(candles) : null, [candles])
+
+  // Cross-asset correlation
+  const btcCorrelation = useMemo(() => {
+    if (!btcCandles.length || !closes.length) return null
+    const btcCloses = btcCandles.map(c => c.close)
+    const corrValues = calculateCorrelation(closes, btcCloses)
+    return corrValues[corrValues.length - 1] ?? null
+  }, [closes, btcCandles])
+
+  const ethCorrelation = useMemo(() => {
+    if (!ethCandles.length || !closes.length) return null
+    const ethCloses = ethCandles.map(c => c.close)
+    const corrValues = calculateCorrelation(closes, ethCloses)
+    return corrValues[corrValues.length - 1] ?? null
+  }, [closes, ethCandles])
 
   const latestRSI = rsiValues[rsiValues.length - 1] ?? null
   const latestStochK = stochastic.kValues[stochastic.kValues.length - 1] ?? null
@@ -336,6 +370,11 @@ const Index = () => {
         const tfAutocorr = calculateAutocorrelation(c)
         const tfVolSpikes = detectVolumeSpikes(r.candles)
 
+        // Ichimoku + CVD per timeframe
+        const tfIchimoku = calculateIchimoku(r.candles)
+        const tfCVD = calculateCVD(r.candles)
+        const len = r.candles.length
+
         return {
           symbol,
           timeframe: r.timeframe,
@@ -374,6 +413,15 @@ const Index = () => {
           autocorrelation: tfAutocorr,
           oiDivergence: null, // OI divergence only available for primary TF
           volumeSpikeRatio: tfVolSpikes.length > 0 ? tfVolSpikes[tfVolSpikes.length - 1]?.ratio ?? null : null,
+          // Ichimoku
+          ichimokuTenkan: tfIchimoku.tenkan[len - 1] ?? null,
+          ichimokuKijun: tfIchimoku.kijun[len - 1] ?? null,
+          ichimokuSenkouA: tfIchimoku.senkouA[len - 1] ?? null,
+          ichimokuSenkouB: tfIchimoku.senkouB[len - 1] ?? null,
+          ichimokuChikou: tfIchimoku.chikou[len - 1] ?? null,
+          // CVD
+          cvd: tfCVD.cvd[tfCVD.cvd.length - 1] ?? null,
+          cvdEma: tfCVD.cvdEma[tfCVD.cvdEma.length - 1] ?? null,
         }
       })
   }, [multiFrameResults, symbol, tickerData])
@@ -416,9 +464,20 @@ const Index = () => {
 
   // ─── Signal Derivation ────────────────────────────────────────────────────
 
+  // Compute Fibonacci per timeframe for signal integration
+  const fibResultsByTf = useMemo(() => {
+    const results: Record<string, ReturnType<typeof calculateFibonacciLevels>> = {}
+    for (const r of multiFrameResults) {
+      if (r.candles.length > 0) {
+        results[r.timeframe] = calculateFibonacciLevels(r.candles)
+      }
+    }
+    return results
+  }, [multiFrameResults])
+
   const snapshots = useMemo<TimeframeSignalSnapshot[]>(
-    () => deriveTimeframeSnapshots(computations, markovPriors, bayesianStateRef.current),
-    [computations, markovPriors]
+    () => deriveTimeframeSnapshots(computations, markovPriors, bayesianStateRef.current, fibResultsByTf),
+    [computations, markovPriors, fibResultsByTf]
   )
 
   const qualifiedSignals = useMemo(() => getQualifiedSignals(snapshots), [snapshots])
@@ -734,6 +793,11 @@ const Index = () => {
         autocorrelation={autocorrelation}
         oiDivergence={oiDivergence}
         volumeSpikeRatio={latestVolumeSpikeRatio}
+        ichimokuResult={ichimokuResult}
+        fibResult={fibResult}
+        cvdResult={cvdResult}
+        btcCorrelation={btcCorrelation}
+        ethCorrelation={ethCorrelation}
       />
 
       {isError && (

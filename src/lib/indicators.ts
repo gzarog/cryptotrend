@@ -750,3 +750,173 @@ export function estimateLiquidationLevels(
 
   return levels.sort((a, b) => a.price - b.price)
 }
+
+// ─── Ichimoku Cloud ──────────────────────────────────────────────────────────
+
+export type IchimokuResult = {
+  tenkan: Array<number | null>
+  kijun: Array<number | null>
+  senkouA: Array<number | null>
+  senkouB: Array<number | null>
+  chikou: Array<number | null>
+}
+
+function periodHighLow(candles: Candle[], end: number, period: number): { high: number; low: number } | null {
+  if (end < period - 1) return null
+  let high = -Infinity
+  let low = Infinity
+  for (let i = end - period + 1; i <= end; i++) {
+    if (candles[i].high > high) high = candles[i].high
+    if (candles[i].low < low) low = candles[i].low
+  }
+  return { high, low }
+}
+
+export function calculateIchimoku(
+  candles: Candle[],
+  tenkanPeriod: number = 9,
+  kijunPeriod: number = 26,
+  senkouBPeriod: number = 52,
+  displacement: number = 26
+): IchimokuResult {
+  const len = candles.length
+  const tenkan: Array<number | null> = new Array(len).fill(null)
+  const kijun: Array<number | null> = new Array(len).fill(null)
+  const senkouA: Array<number | null> = new Array(len + displacement).fill(null)
+  const senkouB: Array<number | null> = new Array(len + displacement).fill(null)
+  const chikou: Array<number | null> = new Array(len).fill(null)
+
+  for (let i = 0; i < len; i++) {
+    const tHL = periodHighLow(candles, i, tenkanPeriod)
+    if (tHL) tenkan[i] = (tHL.high + tHL.low) / 2
+
+    const kHL = periodHighLow(candles, i, kijunPeriod)
+    if (kHL) kijun[i] = (kHL.high + kHL.low) / 2
+
+    // Senkou A = (tenkan + kijun) / 2, shifted forward
+    if (tenkan[i] !== null && kijun[i] !== null) {
+      senkouA[i + displacement] = (tenkan[i]! + kijun[i]!) / 2
+    }
+
+    // Senkou B = (52-period high + low) / 2, shifted forward
+    const bHL = periodHighLow(candles, i, senkouBPeriod)
+    if (bHL) senkouB[i + displacement] = (bHL.high + bHL.low) / 2
+
+    // Chikou = close shifted back
+    if (i >= displacement) {
+      chikou[i - displacement] = candles[i].close
+    }
+  }
+
+  // Trim to original length for consistency with other indicator arrays
+  return {
+    tenkan,
+    kijun,
+    senkouA: senkouA.slice(0, len),
+    senkouB: senkouB.slice(0, len),
+    chikou,
+  }
+}
+
+// ─── Fibonacci Levels ────────────────────────────────────────────────────────
+
+export type FibLevel = {
+  ratio: number
+  price: number
+  label: string
+}
+
+export type FibonacciResult = {
+  levels: FibLevel[]
+  swingHigh: number
+  swingLow: number
+  direction: 'up' | 'down'
+}
+
+const FIB_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
+
+export function calculateFibonacciLevels(candles: Candle[], lookback: number = 100): FibonacciResult | null {
+  if (candles.length < 10) return null
+
+  const recent = candles.slice(-Math.min(lookback, candles.length))
+  let swingHigh = -Infinity
+  let swingLow = Infinity
+
+  for (const c of recent) {
+    if (c.high > swingHigh) swingHigh = c.high
+    if (c.low < swingLow) swingLow = c.low
+  }
+
+  if (swingHigh === swingLow) return null
+
+  const lastClose = candles[candles.length - 1].close
+  const midpoint = (swingHigh + swingLow) / 2
+  const direction: 'up' | 'down' = lastClose >= midpoint ? 'up' : 'down'
+  const range = swingHigh - swingLow
+
+  const levels: FibLevel[] = FIB_RATIOS.map(ratio => {
+    const price = direction === 'up'
+      ? swingHigh - ratio * range  // retracement from high
+      : swingLow + ratio * range   // retracement from low
+    return { ratio, price, label: `${(ratio * 100).toFixed(1)}%` }
+  })
+
+  return { levels, swingHigh, swingLow, direction }
+}
+
+// ─── CVD (Cumulative Volume Delta) ──────────────────────────────────────────
+
+export type CVDResult = {
+  cvd: number[]
+  cvdEma: Array<number | null>
+}
+
+export function calculateCVD(candles: Candle[], emaPeriod: number = 20): CVDResult {
+  const cvd: number[] = []
+  let cumulative = 0
+
+  for (const c of candles) {
+    const range = c.high - c.low
+    const delta = range > 0 ? c.volume * (2 * c.close - c.high - c.low) / range : 0
+    cumulative += delta
+    cvd.push(cumulative)
+  }
+
+  const cvdEma = calculateEMA(cvd, emaPeriod)
+  return { cvd, cvdEma }
+}
+
+// ─── Cross-Asset Correlation ────────────────────────────────────────────────
+
+export function calculateCorrelation(
+  seriesA: number[],
+  seriesB: number[],
+  window: number = 50
+): Array<number | null> {
+  const len = Math.min(seriesA.length, seriesB.length)
+  const result: Array<number | null> = []
+
+  for (let i = 0; i < len; i++) {
+    if (i < window - 1) { result.push(null); continue }
+
+    const a = seriesA.slice(i - window + 1, i + 1)
+    const b = seriesB.slice(i - window + 1, i + 1)
+
+    const meanA = a.reduce((s, v) => s + v, 0) / window
+    const meanB = b.reduce((s, v) => s + v, 0) / window
+
+    let cov = 0, varA = 0, varB = 0
+    for (let j = 0; j < window; j++) {
+      const da = a[j] - meanA
+      const db = b[j] - meanB
+      cov += da * db
+      varA += da * da
+      varB += db * db
+    }
+
+    const denom = Math.sqrt(varA * varB)
+    result.push(denom > 0 ? cov / denom : 0)
+  }
+
+  return result
+}

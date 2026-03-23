@@ -75,6 +75,16 @@ export type TimeframeSignalSnapshot = {
   autocorrelation: number | null
   oiDivergence: number | null
   volumeSpikeRatio: number | null
+
+  // Ichimoku
+  ichimokuTenkan: number | null
+  ichimokuKijun: number | null
+  ichimokuSenkouA: number | null
+  ichimokuSenkouB: number | null
+
+  // CVD
+  cvd: number | null
+  cvdEma: number | null
 }
 
 export type TrendBias = {
