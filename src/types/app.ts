@@ -59,6 +59,8 @@ export type BybitKlineResponse = {
   }
 }
 
+export type NotificationPriority = 'critical' | 'high' | 'medium' | 'low'
+
 export type MomentumComputation = {
   symbol: string
   timeframe: string
@@ -77,6 +79,53 @@ export type MomentumComputation = {
   close: number | null
   volume: number | null
   candles: Candle[]
+
+  // Bollinger Bands
+  bbUpper: number | null
+  bbLower: number | null
+  bbPercentB: number | null
+  bbBandwidth: number | null
+
+  // Supertrend
+  supertrendValue: number | null
+  supertrendDirection: 1 | -1 | null
+
+  // OBV
+  obv: number | null
+  obvEma: number | null
+
+  // VWAP
+  vwap: number | null
+
+  // Volatility
+  volatilityPercentile: number | null
+
+  // Funding rate (from ticker API)
+  fundingRate: number | null
+}
+
+export type SignalNotification = {
+  id: string
+  symbol: string
+  direction: 'long' | 'short'
+  confluenceCount: number
+  avgConfidence: number
+  timeframes: string[]
+  details: string
+  priority: NotificationPriority
+  triggeredAt: number
+}
+
+export type DivergenceNotification = {
+  id: string
+  symbol: string
+  timeframe: string
+  timeframeLabel: string
+  divergenceType: 'bullish' | 'bearish'
+  variant: 'regular' | 'hidden'
+  indicator: string
+  priority: NotificationPriority
+  triggeredAt: number
 }
 
 export type TimeframeOption = {

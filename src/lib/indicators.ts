@@ -320,3 +320,157 @@ export function calculateADX(
 
   return { adx: adxArr, diPlus: diPlusArr, diMinus: diMinusArr }
 }
+
+// ─── Bollinger Bands ─────────────────────────────────────────────────────────
+
+export function calculateBollingerBands(
+  closes: number[],
+  period: number = 20,
+  stdDevMultiplier: number = 2
+): {
+  upper: Array<number | null>
+  middle: Array<number | null>
+  lower: Array<number | null>
+  bandwidth: Array<number | null>
+  percentB: Array<number | null>
+} {
+  const middle = calculateSMA(closes, period)
+  const upper: Array<number | null> = []
+  const lower: Array<number | null> = []
+  const bandwidth: Array<number | null> = []
+  const percentB: Array<number | null> = []
+
+  for (let i = 0; i < closes.length; i++) {
+    if (i < period - 1 || middle[i] === null) {
+      upper.push(null)
+      lower.push(null)
+      bandwidth.push(null)
+      percentB.push(null)
+      continue
+    }
+    const slice = closes.slice(i - period + 1, i + 1)
+    const mean = middle[i]!
+    const variance = slice.reduce((sum, v) => sum + (v - mean) ** 2, 0) / period
+    const stdDev = Math.sqrt(variance)
+    const u = mean + stdDevMultiplier * stdDev
+    const l = mean - stdDevMultiplier * stdDev
+    upper.push(u)
+    lower.push(l)
+    bandwidth.push(mean > 0 ? (u - l) / mean : null)
+    percentB.push(u !== l ? (closes[i] - l) / (u - l) : 0.5)
+  }
+
+  return { upper, middle, lower, bandwidth, percentB }
+}
+
+// ─── Supertrend ──────────────────────────────────────────────────────────────
+
+export function calculateSupertrend(
+  candles: Candle[],
+  period: number = 10,
+  multiplier: number = 3
+): {
+  supertrend: Array<number | null>
+  direction: Array<1 | -1 | null>
+} {
+  const atr = calculateATR(candles, period)
+  const supertrendArr: Array<number | null> = []
+  const directionArr: Array<1 | -1 | null> = []
+
+  let prevUpperBand = 0
+  let prevLowerBand = 0
+  let prevSupertrend = 0
+  let prevDirection: 1 | -1 = 1
+
+  for (let i = 0; i < candles.length; i++) {
+    if (i < period || atr[i] === null) {
+      supertrendArr.push(null)
+      directionArr.push(null)
+      continue
+    }
+
+    const hl2 = (candles[i].high + candles[i].low) / 2
+    let upperBand = hl2 + multiplier * atr[i]!
+    let lowerBand = hl2 - multiplier * atr[i]!
+
+    // Adjust bands based on previous values
+    if (i > period) {
+      if (lowerBand > prevLowerBand || candles[i - 1].close < prevLowerBand) {
+        // keep lowerBand
+      } else {
+        lowerBand = prevLowerBand
+      }
+
+      if (upperBand < prevUpperBand || candles[i - 1].close > prevUpperBand) {
+        // keep upperBand
+      } else {
+        upperBand = prevUpperBand
+      }
+    }
+
+    let dir: 1 | -1
+    if (i === period) {
+      dir = candles[i].close > upperBand ? 1 : -1
+    } else {
+      if (prevDirection === 1) {
+        dir = candles[i].close < lowerBand ? -1 : 1
+      } else {
+        dir = candles[i].close > upperBand ? 1 : -1
+      }
+    }
+
+    const st = dir === 1 ? lowerBand : upperBand
+    supertrendArr.push(st)
+    directionArr.push(dir)
+
+    prevUpperBand = upperBand
+    prevLowerBand = lowerBand
+    prevSupertrend = st
+    prevDirection = dir
+  }
+
+  return { supertrend: supertrendArr, direction: directionArr }
+}
+
+// ─── OBV (On-Balance Volume) ─────────────────────────────────────────────────
+
+export function calculateOBV(candles: Candle[]): number[] {
+  if (candles.length === 0) return []
+  const obv: number[] = [0]
+  for (let i = 1; i < candles.length; i++) {
+    if (candles[i].close > candles[i - 1].close) {
+      obv.push(obv[i - 1] + candles[i].volume)
+    } else if (candles[i].close < candles[i - 1].close) {
+      obv.push(obv[i - 1] - candles[i].volume)
+    } else {
+      obv.push(obv[i - 1])
+    }
+  }
+  return obv
+}
+
+// ─── VWAP (Volume-Weighted Average Price) ────────────────────────────────────
+
+export function calculateVWAP(candles: Candle[]): Array<number | null> {
+  let cumulativeTPV = 0
+  let cumulativeVolume = 0
+  return candles.map(c => {
+    const typicalPrice = (c.high + c.low + c.close) / 3
+    cumulativeTPV += typicalPrice * c.volume
+    cumulativeVolume += c.volume
+    return cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : null
+  })
+}
+
+// ─── Volatility Percentile ───────────────────────────────────────────────────
+
+export function calculateVolatilityPercentile(
+  atrValues: Array<number | null>,
+  lookback: number = 100
+): number | null {
+  const recent = atrValues.filter((v): v is number => v !== null).slice(-lookback)
+  if (recent.length < 20) return null
+  const current = recent[recent.length - 1]
+  const belowCount = recent.filter(v => v <= current).length
+  return (belowCount / recent.length) * 100
+}

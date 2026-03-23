@@ -1,24 +1,27 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import type { MomentumNotification, MovingAverageCrossNotification } from '../types/app'
+import { useState, useEffect, useRef } from 'react'
+import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification } from '../types/app'
 
 export type UnifiedNotification = {
   id: string
-  type: 'momentum' | 'cross'
+  type: 'momentum' | 'cross' | 'signal' | 'divergence'
   title: string
   body: string
   symbol: string
   triggeredAt: number
   accentClass: string
   icon: string
+  priority?: string
 }
 
-type FilterType = 'all' | 'momentum' | 'cross'
+type FilterType = 'all' | 'momentum' | 'cross' | 'signal' | 'divergence'
 
 type Props = {
   open: boolean
   onClose: () => void
   momentumNotifications: MomentumNotification[]
   crossNotifications: MovingAverageCrossNotification[]
+  signalNotifications?: SignalNotification[]
+  divergenceNotifications?: DivergenceNotification[]
   readIds: Set<string>
   onMarkRead: (id: string) => void
   onMarkAllRead: () => void
@@ -29,6 +32,8 @@ type Props = {
 function unify(
   momentum: MomentumNotification[],
   cross: MovingAverageCrossNotification[],
+  signals: SignalNotification[] = [],
+  divergences: DivergenceNotification[] = [],
 ): UnifiedNotification[] {
   const items: UnifiedNotification[] = []
 
@@ -58,6 +63,34 @@ function unify(
     })
   }
 
+  for (const n of signals) {
+    items.push({
+      id: n.id,
+      type: 'signal',
+      title: `${n.confluenceCount}-TF ${n.direction.toUpperCase()} Confluence`,
+      body: `${n.timeframes.join(', ')} • Avg: ${(n.avgConfidence * 100).toFixed(0)}%`,
+      symbol: n.symbol,
+      triggeredAt: n.triggeredAt,
+      accentClass: n.direction === 'long' ? 'border-l-emerald-500' : 'border-l-orange-500',
+      icon: n.direction === 'long' ? '📈' : '📉',
+      priority: n.priority,
+    })
+  }
+
+  for (const n of divergences) {
+    items.push({
+      id: n.id,
+      type: 'divergence',
+      title: `${n.variant.charAt(0).toUpperCase() + n.variant.slice(1)} ${n.divergenceType} divergence`,
+      body: `${n.timeframeLabel} • ${n.indicator.replace('divergence-', '').toUpperCase()}`,
+      symbol: n.symbol,
+      triggeredAt: n.triggeredAt,
+      accentClass: n.divergenceType === 'bullish' ? 'border-l-cyan-500' : 'border-l-pink-500',
+      icon: n.divergenceType === 'bullish' ? '🔵' : '🔻',
+      priority: n.priority,
+    })
+  }
+
   return items.sort((a, b) => b.triggeredAt - a.triggeredAt)
 }
 
@@ -77,6 +110,8 @@ const FILTER_TABS: { key: FilterType; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'momentum', label: 'Momentum' },
   { key: 'cross', label: 'MA Cross' },
+  { key: 'signal', label: 'Signal' },
+  { key: 'divergence', label: 'Diverg.' },
 ]
 
 export function NotificationPanel({
@@ -84,6 +119,8 @@ export function NotificationPanel({
   onClose,
   momentumNotifications,
   crossNotifications,
+  signalNotifications = [],
+  divergenceNotifications = [],
   readIds,
   onMarkRead,
   onMarkAllRead,
@@ -109,14 +146,16 @@ export function NotificationPanel({
 
   if (!open) return null
 
-  const allItems = unify(momentumNotifications, crossNotifications)
+  const allItems = unify(momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications)
   const filteredItems = filter === 'all' ? allItems : allItems.filter(i => i.type === filter)
   const unreadCount = allItems.filter(i => !readIds.has(i.id)).length
 
-  const countByType = {
+  const countByType: Record<FilterType, number> = {
     all: allItems.length,
     momentum: allItems.filter(i => i.type === 'momentum').length,
     cross: allItems.filter(i => i.type === 'cross').length,
+    signal: allItems.filter(i => i.type === 'signal').length,
+    divergence: allItems.filter(i => i.type === 'divergence').length,
   }
 
   return (
@@ -169,12 +208,12 @@ export function NotificationPanel({
         </div>
 
         {/* Filter Tabs */}
-        <div className="flex gap-1 bg-black/20 rounded-lg p-0.5">
+        <div className="flex gap-0.5 bg-black/20 rounded-lg p-0.5 overflow-x-auto">
           {FILTER_TABS.map(tab => (
             <button
               key={tab.key}
               onClick={() => setFilter(tab.key)}
-              className={`flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
+              className={`flex-1 px-1.5 py-1 rounded-md text-[10px] font-medium transition-all whitespace-nowrap ${
                 filter === tab.key
                   ? 'bg-primary/20 text-primary shadow-sm'
                   : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
@@ -182,7 +221,7 @@ export function NotificationPanel({
             >
               {tab.label}
               {countByType[tab.key] > 0 && (
-                <span className="ml-1 text-[9px] opacity-60">({countByType[tab.key]})</span>
+                <span className="ml-0.5 text-[9px] opacity-60">({countByType[tab.key]})</span>
               )}
             </button>
           ))}

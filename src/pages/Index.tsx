@@ -3,11 +3,21 @@ import { MainLayout } from '../layouts/MainLayout'
 import { ControlBar } from '../components/ControlBar'
 import { DashboardView } from '../components/DashboardView'
 import { NotificationDialog } from '../components/NotificationDialog'
-import { useMarketData, useMultiFrameMarketData } from '../hooks/useMarketData'
-import { calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI, calculateMACD, calculateADX, calculateATR } from '../lib/indicators'
-import { deriveCombinedSignal, deriveTimeframeSnapshots, getQualifiedSignals, deriveTrendBias, calculateMarkovPrior, calculateMultiTimeframeMarkovPriors } from '../lib/signals'
-import { createNotificationId, showBrowserNotification } from '../lib/notifications'
-import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation } from '../types/app'
+import { useMarketData, useMultiFrameMarketData, useTickerData } from '../hooks/useMarketData'
+import {
+  calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI,
+  calculateMACD, calculateADX, calculateATR,
+  calculateBollingerBands, calculateSupertrend, calculateOBV, calculateVWAP,
+  calculateVolatilityPercentile,
+} from '../lib/indicators'
+import {
+  deriveTimeframeSnapshots, getQualifiedSignals,
+  calculateMultiTimeframeMarkovPriors,
+  deriveMultiTimeframeConfluence, deriveDivergenceSignals,
+} from '../lib/signals'
+import { createNotificationId, showBrowserNotification, getCooldown, playNotificationSound, getTimeframePriority } from '../lib/notifications'
+import { calculateRiskLevels } from '../lib/risk'
+import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, SignalNotification, DivergenceNotification } from '../types/app'
 import type { TimeframeSignalSnapshot } from '../types/signals'
 
 // ─── Timeframe-Adaptive Settings ────────────────────────────────────────────
@@ -92,21 +102,31 @@ function detectMACross(
 function detectMomentum(
   rsi: number | null,
   stochD: number | null,
-  timeframe: string,
-  timeframeLabel: string
 ): { direction: 'long' | 'short'; intensity: MomentumNotification['intensity'] } | null {
   if (rsi === null || stochD === null) return null
 
-  // Strong long: RSI < 25 and StochD < 15
   if (rsi < 25 && stochD < 15) return { direction: 'long', intensity: 'green' }
-  // Moderate long: RSI < 35 and StochD < 25
   if (rsi < 35 && stochD < 25) return { direction: 'long', intensity: 'yellow' }
-  // Strong short: RSI > 75 and StochD > 85
   if (rsi > 75 && stochD > 85) return { direction: 'short', intensity: 'orange' }
-  // Extreme short: RSI > 85 and StochD > 90
   if (rsi > 85 && stochD > 90) return { direction: 'short', intensity: 'red' }
 
   return null
+}
+
+// ─── localStorage Helpers ───────────────────────────────────────────────────
+
+function loadFromStorage<T>(key: string, fallback: T): T {
+  try {
+    const stored = localStorage.getItem(key)
+    return stored ? JSON.parse(stored) : fallback
+  } catch { return fallback }
+}
+
+function loadSetFromStorage(key: string): Set<string> {
+  try {
+    const stored = localStorage.getItem(key)
+    return stored ? new Set(JSON.parse(stored)) : new Set()
+  } catch { return new Set() }
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -130,11 +150,39 @@ const Index = () => {
   const [barLimit, setBarLimit] = useState(400)
   const [showNotifDialog, setShowNotifDialog] = useState(false)
   const [showNotifPanel, setShowNotifPanel] = useState(false)
-  const [readNotifIds, setReadNotifIds] = useState<Set<string>>(new Set())
-  // Notification state
-  const [momentumNotifications, setMomentumNotifications] = useState<MomentumNotification[]>([])
-  const [crossNotifications, setCrossNotifications] = useState<MovingAverageCrossNotification[]>([])
+  const [readNotifIds, setReadNotifIds] = useState<Set<string>>(() => loadSetFromStorage('read-notif-ids'))
+
+  // Notification state — persist via localStorage
+  const [momentumNotifications, setMomentumNotifications] = useState<MomentumNotification[]>(
+    () => loadFromStorage('momentum-notifications', [])
+  )
+  const [crossNotifications, setCrossNotifications] = useState<MovingAverageCrossNotification[]>(
+    () => loadFromStorage('cross-notifications', [])
+  )
+  const [signalNotifications, setSignalNotifications] = useState<SignalNotification[]>(
+    () => loadFromStorage('signal-notifications', [])
+  )
+  const [divergenceNotifications, setDivergenceNotifications] = useState<DivergenceNotification[]>(
+    () => loadFromStorage('divergence-notifications', [])
+  )
   const prevCrossRef = useRef<Record<string, 'golden' | 'death' | null>>({})
+
+  // Persist notifications to localStorage
+  useEffect(() => {
+    localStorage.setItem('momentum-notifications', JSON.stringify(momentumNotifications.slice(0, 50)))
+  }, [momentumNotifications])
+  useEffect(() => {
+    localStorage.setItem('cross-notifications', JSON.stringify(crossNotifications.slice(0, 50)))
+  }, [crossNotifications])
+  useEffect(() => {
+    localStorage.setItem('signal-notifications', JSON.stringify(signalNotifications.slice(0, 50)))
+  }, [signalNotifications])
+  useEffect(() => {
+    localStorage.setItem('divergence-notifications', JSON.stringify(divergenceNotifications.slice(0, 50)))
+  }, [divergenceNotifications])
+  useEffect(() => {
+    localStorage.setItem('read-notif-ids', JSON.stringify([...readNotifIds]))
+  }, [readNotifIds])
 
   const refreshInterval = parseFloat(refreshSelection) * 60 * 1000
 
@@ -147,6 +195,9 @@ const Index = () => {
   const multiFrameResults = useMultiFrameMarketData(
     symbol, MULTI_TF_LIST, Math.min(barLimit, 200), refreshInterval, true
   )
+
+  // Ticker data (funding rate, etc.)
+  const { data: tickerData } = useTickerData(symbol, refreshInterval, true)
 
   const lastUpdated = useMemo(() => {
     if (!candles?.length) return ''
@@ -189,14 +240,33 @@ const Index = () => {
   const adxResult = useMemo(() => candles ? calculateADX(candles, 14) : { adx: [], diPlus: [], diMinus: [] }, [candles])
   const atrValues = useMemo(() => candles ? calculateATR(candles, 14) : [], [candles])
 
+  // New primary indicators
+  const bbResult = useMemo(() => calculateBollingerBands(closes, 20, 2), [closes])
+  const stResult = useMemo(() => candles ? calculateSupertrend(candles, 10, 3) : { supertrend: [], direction: [] }, [candles])
+  const obvValues = useMemo(() => candles ? calculateOBV(candles) : [], [candles])
+  const obvEmaValues = useMemo(() => calculateEMA(obvValues, 20), [obvValues])
+  const vwapValues = useMemo(() => candles ? calculateVWAP(candles) : [], [candles])
+
   const latestRSI = rsiValues[rsiValues.length - 1] ?? null
   const latestStochK = stochastic.kValues[stochastic.kValues.length - 1] ?? null
   const latestStochD = stochastic.dValues[stochastic.dValues.length - 1] ?? null
   const latestMACDLine = macd.macdLine[macd.macdLine.length - 1] ?? null
   const latestMACDSignal = macd.signalLine[macd.signalLine.length - 1] ?? null
   const latestMACDHist = macd.histogram[macd.histogram.length - 1] ?? null
-  const latestADX = adxResult.adx[adxResult.adx.length - 1] ?? null
   const latestATR = atrValues[atrValues.length - 1] ?? null
+  const latestBBPercentB = bbResult.percentB[bbResult.percentB.length - 1] ?? null
+  const latestBBBandwidth = bbResult.bandwidth[bbResult.bandwidth.length - 1] ?? null
+  const latestSTDir = stResult.direction[stResult.direction.length - 1] ?? null
+  const latestVolPercentile = useMemo(() => calculateVolatilityPercentile(atrValues), [atrValues])
+
+  // ─── Risk Levels ──────────────────────────────────────────────────────────
+
+  const riskLevels = useMemo(() => {
+    const price = latestCandle?.close
+    if (!price || latestATR === null) return null
+    const direction = latestRSI !== null && latestRSI < 50 ? 'long' as const : 'short' as const
+    return calculateRiskLevels(price, latestATR, direction)
+  }, [latestCandle, latestATR, latestRSI])
 
   // ─── Multi-Timeframe Computations ─────────────────────────────────────────
 
@@ -217,6 +287,12 @@ const Index = () => {
         const tfSma200 = calculateSMA(c, 200)
         const tfAdx = calculateADX(r.candles, 14)
         const tfAtr = calculateATR(r.candles, 14)
+        const tfBB = calculateBollingerBands(c, 20, 2)
+        const tfST = calculateSupertrend(r.candles, 10, 3)
+        const tfOBV = calculateOBV(r.candles)
+        const tfOBVEma = calculateEMA(tfOBV, 20)
+        const tfVWAP = calculateVWAP(r.candles)
+        const tfVolPct = calculateVolatilityPercentile(tfAtr)
 
         return {
           symbol,
@@ -236,9 +312,20 @@ const Index = () => {
           close: c[c.length - 1] ?? null,
           volume: r.candles[r.candles.length - 1]?.volume ?? null,
           candles: r.candles,
+          bbUpper: tfBB.upper[tfBB.upper.length - 1] ?? null,
+          bbLower: tfBB.lower[tfBB.lower.length - 1] ?? null,
+          bbPercentB: tfBB.percentB[tfBB.percentB.length - 1] ?? null,
+          bbBandwidth: tfBB.bandwidth[tfBB.bandwidth.length - 1] ?? null,
+          supertrendValue: tfST.supertrend[tfST.supertrend.length - 1] ?? null,
+          supertrendDirection: tfST.direction[tfST.direction.length - 1] ?? null,
+          obv: tfOBV[tfOBV.length - 1] ?? null,
+          obvEma: tfOBVEma[tfOBVEma.length - 1] ?? null,
+          vwap: tfVWAP[tfVWAP.length - 1] ?? null,
+          volatilityPercentile: tfVolPct,
+          fundingRate: tickerData?.fundingRate ?? null,
         }
       })
-  }, [multiFrameResults, symbol])
+  }, [multiFrameResults, symbol, tickerData])
 
   // ─── Markov Priors ────────────────────────────────────────────────────────
 
@@ -259,6 +346,7 @@ const Index = () => {
 
   const qualifiedSignals = useMemo(() => getQualifiedSignals(snapshots), [snapshots])
 
+  const confluence = useMemo(() => deriveMultiTimeframeConfluence(snapshots), [snapshots])
 
   // ─── Multi-TF MA Cross Detection ─────────────────────────────────────────
 
@@ -272,6 +360,7 @@ const Index = () => {
       const cross = detectMACross(tfEma10, tfEma50, prevState)
       if (cross) {
         prevCrossRef.current = { ...prevCrossRef.current, [comp.timeframe]: cross.direction }
+        const priority = getTimeframePriority(comp.timeframe)
         const notif: MovingAverageCrossNotification = {
           id: createNotificationId(),
           symbol,
@@ -283,21 +372,24 @@ const Index = () => {
           price: comp.close,
           triggeredAt: Date.now(),
         }
-        setCrossNotifications(prev => [notif, ...prev].slice(0, 30))
+        setCrossNotifications(prev => [notif, ...prev].slice(0, 50))
         showBrowserNotification(
           `${cross.direction === 'golden' ? '🟡 Golden' : '🟣 Death'} Cross — ${symbol} (${comp.timeframeLabel})`,
           `EMA 10/50 ${cross.direction} cross at $${comp.close.toLocaleString()}`
         )
+        playNotificationSound(priority)
       }
     }
   }, [computations, symbol])
 
-  // ─── Multi-TF Momentum Detection ──────────────────────────────────────────
+  // ─── Multi-TF Momentum Detection (with TF-aware cooldowns) ────────────────
 
   useEffect(() => {
     for (const comp of computations) {
-      const momentum = detectMomentum(comp.rsi, comp.stochD, comp.timeframe, comp.timeframeLabel)
+      const momentum = detectMomentum(comp.rsi, comp.stochD)
       if (momentum) {
+        const cooldown = getCooldown(comp.timeframe)
+        const priority = getTimeframePriority(comp.timeframe)
         const notif: MomentumNotification = {
           id: createNotificationId(),
           symbol,
@@ -311,29 +403,152 @@ const Index = () => {
           triggeredAt: Date.now(),
         }
         setMomentumNotifications(prev => {
-          const recent = prev.filter(p => Date.now() - p.triggeredAt < 60000 && p.direction === momentum.direction && p.timeframeSummary === comp.timeframeLabel)
+          const recent = prev.filter(p =>
+            Date.now() - p.triggeredAt < cooldown &&
+            p.direction === momentum.direction &&
+            p.timeframeSummary === comp.timeframeLabel
+          )
           if (recent.length > 0) return prev
           showBrowserNotification(
             `${momentum.direction === 'long' ? '🟢' : '🔴'} ${momentum.direction.toUpperCase()} Momentum — ${symbol} (${comp.timeframeLabel})`,
             `RSI: ${comp.rsi?.toFixed(1) ?? '—'} | Stoch D: ${comp.stochD?.toFixed(1) ?? '—'}`
           )
-          return [notif, ...prev].slice(0, 30)
+          playNotificationSound(priority)
+          return [notif, ...prev].slice(0, 50)
         })
       }
     }
   }, [computations, symbol])
 
+  // ─── Confluence-Based Signal Notifications ────────────────────────────────
+
+  useEffect(() => {
+    if (qualifiedSignals.length < 2) return
+
+    const longSignals = qualifiedSignals.filter(s => s.direction === 'long')
+    const shortSignals = qualifiedSignals.filter(s => s.direction === 'short')
+
+    for (const [direction, signals] of [['long', longSignals], ['short', shortSignals]] as const) {
+      if (signals.length < 3) continue
+
+      const avgConfidence = signals.reduce((s, sig) => s + sig.confidence, 0) / signals.length
+      const timeframes = signals.map(s => s.timeframeLabel)
+      const priority = signals.length >= 4 && avgConfidence > 0.7 ? 'high' as const : 'medium' as const
+
+      setSignalNotifications(prev => {
+        const recent = prev.filter(p =>
+          Date.now() - p.triggeredAt < 15 * 60 * 1000 &&
+          p.direction === direction
+        )
+        if (recent.length > 0) return prev
+
+        const notif: SignalNotification = {
+          id: createNotificationId(),
+          symbol,
+          direction,
+          confluenceCount: signals.length,
+          avgConfidence,
+          timeframes,
+          details: `${signals.length} timeframes aligned ${direction}: ${timeframes.join(', ')}`,
+          priority,
+          triggeredAt: Date.now(),
+        }
+
+        showBrowserNotification(
+          `${direction === 'long' ? '🟢' : '🔴'} ${signals.length}-TF Confluence — ${symbol}`,
+          `${timeframes.join(', ')} | Avg confidence: ${(avgConfidence * 100).toFixed(0)}%`
+        )
+        playNotificationSound(priority)
+        return [notif, ...prev].slice(0, 50)
+      })
+    }
+  }, [qualifiedSignals, symbol])
+
+  // ─── Divergence Notifications ─────────────────────────────────────────────
+
+  useEffect(() => {
+    for (const comp of computations) {
+      if (!comp.candles.length || comp.candles.length < 50) continue
+      const c = comp.candles.map(x => x.close)
+      const tfRsiSetting = RSI_SETTINGS[comp.timeframe] ?? DEFAULT_RSI
+      const tfMacdSetting = MACD_SETTINGS[comp.timeframe] ?? DEFAULT_MACD
+      const rsiArr = calculateRSI(c, tfRsiSetting.period)
+      const macdResult = calculateMACD(c, tfMacdSetting.fast, tfMacdSetting.slow, tfMacdSetting.signal)
+
+      const divSignals = deriveDivergenceSignals(c, rsiArr, macdResult.histogram)
+      for (const sig of divSignals) {
+        if (sig.confidence < 0.6) continue
+
+        const cooldown = getCooldown(comp.timeframe) * 2
+        const priority = parseInt(comp.timeframe) >= 240 ? 'high' as const :
+                         parseInt(comp.timeframe) >= 60 ? 'medium' as const : 'low' as const
+
+        setDivergenceNotifications(prev => {
+          const recent = prev.filter(p =>
+            Date.now() - p.triggeredAt < cooldown &&
+            p.timeframe === comp.timeframe &&
+            p.indicator === sig.source
+          )
+          if (recent.length > 0) return prev
+
+          const divType = sig.direction === 'long' ? 'bullish' : 'bearish'
+          const variant = sig.label.includes('hidden') ? 'hidden' as const : 'regular' as const
+          const notif: DivergenceNotification = {
+            id: createNotificationId(),
+            symbol,
+            timeframe: comp.timeframe,
+            timeframeLabel: comp.timeframeLabel,
+            divergenceType: divType,
+            variant,
+            indicator: sig.source,
+            priority,
+            triggeredAt: Date.now(),
+          }
+
+          showBrowserNotification(
+            `${divType === 'bullish' ? '🟢' : '🔴'} ${variant.charAt(0).toUpperCase() + variant.slice(1)} ${divType} divergence — ${symbol} (${comp.timeframeLabel})`,
+            sig.label
+          )
+          playNotificationSound(priority)
+          return [notif, ...prev].slice(0, 50)
+        })
+      }
+    }
+  }, [computations, symbol])
+
+  // ─── Funding Rate Notifications ───────────────────────────────────────────
+
+  const prevFundingRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!tickerData) return
+    const rate = tickerData.fundingRate
+    const prevRate = prevFundingRef.current
+    prevFundingRef.current = rate
+
+    if (Math.abs(rate) >= 0.0005 && (prevRate === null || Math.abs(prevRate) < 0.0005)) {
+      const direction = rate > 0 ? 'Longs paying' : 'Shorts paying'
+      showBrowserNotification(
+        `⚠️ Extreme Funding — ${symbol}`,
+        `${direction}: ${(rate * 100).toFixed(4)}%`
+      )
+      playNotificationSound('medium')
+    }
+  }, [tickerData, symbol])
+
   // Reset detection refs on symbol change
   useEffect(() => {
     prevCrossRef.current = {}
+    prevFundingRef.current = null
   }, [symbol])
 
   const allNotifIds = useMemo(() => {
     const ids: string[] = []
     for (const n of momentumNotifications) ids.push(n.id)
     for (const n of crossNotifications) ids.push(n.id)
+    for (const n of signalNotifications) ids.push(n.id)
+    for (const n of divergenceNotifications) ids.push(n.id)
     return ids
-  }, [momentumNotifications, crossNotifications])
+  }, [momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications])
 
   const unreadCount = useMemo(
     () => allNotifIds.filter(id => !readNotifIds.has(id)).length,
@@ -351,6 +566,8 @@ const Index = () => {
   const handleClearAll = useCallback(() => {
     setMomentumNotifications([])
     setCrossNotifications([])
+    setSignalNotifications([])
+    setDivergenceNotifications([])
     setReadNotifIds(new Set())
   }, [])
 
@@ -362,6 +579,8 @@ const Index = () => {
       onCloseNotifPanel={() => setShowNotifPanel(false)}
       momentumNotifications={momentumNotifications}
       crossNotifications={crossNotifications}
+      signalNotifications={signalNotifications}
+      divergenceNotifications={divergenceNotifications}
       readNotifIds={readNotifIds}
       onMarkRead={handleMarkRead}
       onMarkAllRead={handleMarkAllRead}
@@ -409,8 +628,24 @@ const Index = () => {
         latestMACDHist={latestMACDHist}
         momentumNotifications={momentumNotifications}
         crossNotifications={crossNotifications}
+        signalNotifications={signalNotifications}
+        divergenceNotifications={divergenceNotifications}
         snapshots={snapshots}
         qualifiedSignals={qualifiedSignals}
+        confluence={confluence}
+        bbUpper={bbResult.upper}
+        bbLower={bbResult.lower}
+        bbPercentB={latestBBPercentB}
+        bbBandwidth={latestBBBandwidth}
+        supertrend={stResult.supertrend}
+        supertrendDirection={stResult.direction}
+        latestSTDir={latestSTDir}
+        obv={obvValues}
+        obvEma={obvEmaValues}
+        vwap={vwapValues}
+        volatilityPercentile={latestVolPercentile}
+        riskLevels={riskLevels}
+        fundingRate={tickerData?.fundingRate ?? null}
       />
 
       {isError && (

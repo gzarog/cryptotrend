@@ -1,6 +1,6 @@
 import React from 'react'
 import { NotificationPanel } from '../components/NotificationPanel'
-import type { MomentumNotification, MovingAverageCrossNotification } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification } from '../types/app'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -10,6 +10,8 @@ interface MainLayoutProps {
   onCloseNotifPanel?: () => void
   momentumNotifications?: MomentumNotification[]
   crossNotifications?: MovingAverageCrossNotification[]
+  signalNotifications?: SignalNotification[]
+  divergenceNotifications?: DivergenceNotification[]
   readNotifIds?: Set<string>
   onMarkRead?: (id: string) => void
   onMarkAllRead?: () => void
@@ -25,6 +27,8 @@ export function MainLayout({
   onCloseNotifPanel,
   momentumNotifications = [],
   crossNotifications = [],
+  signalNotifications = [],
+  divergenceNotifications = [],
   readNotifIds = new Set(),
   onMarkRead,
   onMarkAllRead,
@@ -74,7 +78,8 @@ export function MainLayout({
             onClose={() => onCloseNotifPanel?.()}
             momentumNotifications={momentumNotifications}
             crossNotifications={crossNotifications}
-            
+            signalNotifications={signalNotifications}
+            divergenceNotifications={divergenceNotifications}
             readIds={readNotifIds}
             onMarkRead={(id) => onMarkRead?.(id)}
             onMarkAllRead={() => onMarkAllRead?.()}

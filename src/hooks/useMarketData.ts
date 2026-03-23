@@ -4,6 +4,41 @@ import type { Candle, BybitKlineResponse } from '../types/app'
 const MAX_BAR_LIMIT = 5000
 const BYBIT_REQUEST_LIMIT = 200
 
+export type TickerData = {
+  fundingRate: number
+  markPrice: number
+  indexPrice: number
+  openInterest: number
+  volume24h: number
+  high24h: number
+  low24h: number
+}
+
+async function fetchBybitTicker(symbol: string): Promise<TickerData> {
+  const url = new URL('https://api.bybit.com/v5/market/tickers')
+  url.searchParams.set('category', 'linear')
+  url.searchParams.set('symbol', symbol)
+
+  const response = await fetch(url.toString(), { headers: { Accept: 'application/json' } })
+  if (!response.ok) throw new Error(`Ticker fetch failed (${response.status})`)
+
+  const payload = await response.json()
+  if (payload.retCode !== 0 || !payload.result?.list?.[0]) {
+    throw new Error(payload.retMsg || 'Ticker API error')
+  }
+
+  const t = payload.result.list[0]
+  return {
+    fundingRate: parseFloat(t.fundingRate ?? '0'),
+    markPrice: parseFloat(t.markPrice ?? '0'),
+    indexPrice: parseFloat(t.indexPrice ?? '0'),
+    openInterest: parseFloat(t.openInterest ?? '0'),
+    volume24h: parseFloat(t.volume24h ?? '0'),
+    high24h: parseFloat(t.highPrice24h ?? '0'),
+    low24h: parseFloat(t.lowPrice24h ?? '0'),
+  }
+}
+
 async function fetchBybitOHLCV(symbol: string, interval: string, limit: number): Promise<Candle[]> {
   const sanitizedLimit = Math.min(Math.max(Math.floor(limit), 1), MAX_BAR_LIMIT)
   const collected: Candle[] = []
@@ -125,4 +160,24 @@ export function useMultiFrameMarketData(
     isLoading: q.isLoading,
     isError: q.isError,
   }))
+}
+
+// ─── Ticker / Funding Rate Hook ─────────────────────────────────────────────
+
+export function useTickerData(
+  symbol: string,
+  refreshInterval: number | false,
+  enabled: boolean
+) {
+  const normalizedSymbol = symbol.trim().toUpperCase()
+
+  return useQuery<TickerData>({
+    queryKey: ['bybit-ticker', normalizedSymbol],
+    queryFn: () => fetchBybitTicker(normalizedSymbol),
+    refetchInterval: refreshInterval,
+    refetchIntervalInBackground: true,
+    retry: 1,
+    enabled,
+    placeholderData: (previousData) => previousData,
+  })
 }

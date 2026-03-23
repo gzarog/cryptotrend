@@ -30,6 +30,16 @@ export type MultiTimeframeSignal = {
   alignmentRatio: number
 }
 
+export type MultiTimeframeConfluence = {
+  direction: SignalDirection
+  score: number
+  alignmentRatio: number
+  confluenceLevel: 'strong' | 'moderate' | 'weak' | 'mixed'
+  longCount: number
+  shortCount: number
+  neutralCount: number
+}
+
 export type TimeframeSignalSnapshot = {
   timeframe: string
   timeframeLabel: string
@@ -47,6 +57,14 @@ export type TimeframeSignalSnapshot = {
   ema50: number | null
   sma200: number | null
   trendBias: TrendBias
+
+  // New indicator fields
+  bbPercentB: number | null
+  bbBandwidth: number | null
+  supertrendDirection: 1 | -1 | null
+  obv: number | null
+  vwap: number | null
+  volatilityPercentile: number | null
 }
 
 export type TrendBias = {

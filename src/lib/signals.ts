@@ -4,11 +4,12 @@ import type {
   SignalStrength,
   TradingSignal,
   CombinedSignal,
-  
+  MultiTimeframeConfluence,
   TimeframeSignalSnapshot,
   TrendBias,
   QualifiedSignal,
 } from '../types/signals'
+import { detectDivergences } from './divergence'
 
 
 
@@ -136,6 +137,84 @@ function deriveADXSignal(adx: number | null, direction: SignalDirection): Tradin
   }
 }
 
+// ─── Bollinger Bands Signal ─────────────────────────────────────────────────
+
+function deriveBBSignal(percentB: number | null, bandwidth: number | null): TradingSignal {
+  if (percentB === null) return { direction: 'neutral', strength: 'none', confidence: 0, label: 'BB N/A', source: 'bb' }
+
+  let direction: SignalDirection = 'neutral'
+  let confidence = 0
+
+  if (percentB <= 0) { direction = 'long'; confidence = 0.8 }
+  else if (percentB <= 0.1) { direction = 'long'; confidence = 0.6 }
+  else if (percentB <= 0.2) { direction = 'long'; confidence = 0.4 }
+  else if (percentB >= 1) { direction = 'short'; confidence = 0.8 }
+  else if (percentB >= 0.9) { direction = 'short'; confidence = 0.6 }
+  else if (percentB >= 0.8) { direction = 'short'; confidence = 0.4 }
+  else { confidence = 0.1 }
+
+  return {
+    direction,
+    strength: confidenceToStrength(confidence),
+    confidence,
+    label: `BB %B ${(percentB * 100).toFixed(0)}%`,
+    source: 'bb',
+  }
+}
+
+// ─── Supertrend Signal ──────────────────────────────────────────────────────
+
+function deriveSupertrendSignal(stDir: 1 | -1 | null): TradingSignal {
+  if (stDir === null) return { direction: 'neutral', strength: 'none', confidence: 0, label: 'ST N/A', source: 'supertrend' }
+
+  const direction: SignalDirection = stDir === 1 ? 'long' : 'short'
+  return {
+    direction,
+    strength: 'moderate',
+    confidence: 0.65,
+    label: `Supertrend ${direction === 'long' ? 'Bullish' : 'Bearish'}`,
+    source: 'supertrend',
+  }
+}
+
+// ─── Divergence Signal ──────────────────────────────────────────────────────
+
+export function deriveDivergenceSignals(
+  closes: number[],
+  rsi: Array<number | null>,
+  macdHistogram: Array<number | null>
+): TradingSignal[] {
+  const signals: TradingSignal[] = []
+
+  const rsiDivs = detectDivergences(closes, rsi, 100, 5)
+  for (const div of rsiDivs) {
+    const isRecent = div.endIndex >= closes.length - 10
+    if (!isRecent) continue
+    signals.push({
+      direction: div.type === 'bullish' ? 'long' : 'short',
+      strength: div.variant === 'regular' ? 'strong' : 'moderate',
+      confidence: div.variant === 'regular' ? 0.75 : 0.5,
+      label: `RSI ${div.variant} ${div.type} divergence`,
+      source: 'divergence-rsi',
+    })
+  }
+
+  const macdDivs = detectDivergences(closes, macdHistogram, 100, 5)
+  for (const div of macdDivs) {
+    const isRecent = div.endIndex >= closes.length - 10
+    if (!isRecent) continue
+    signals.push({
+      direction: div.type === 'bullish' ? 'long' : 'short',
+      strength: div.variant === 'regular' ? 'strong' : 'moderate',
+      confidence: div.variant === 'regular' ? 0.7 : 0.45,
+      label: `MACD ${div.variant} ${div.type} divergence`,
+      source: 'divergence-macd',
+    })
+  }
+
+  return signals
+}
+
 // ─── Trend Bias ─────────────────────────────────────────────────────────────
 
 export function deriveTrendBias(comp: MomentumComputation): TrendBias {
@@ -176,8 +255,10 @@ export function deriveCombinedSignal(comp: MomentumComputation, markovPrior: num
   const trendDirection = trendBias.direction
 
   const adxSignal = deriveADXSignal(comp.adx, trendDirection)
+  const bbSignal = deriveBBSignal(comp.bbPercentB, comp.bbBandwidth)
+  const stSignal = deriveSupertrendSignal(comp.supertrendDirection)
 
-  const signals = [rsiSignal, stochSignal, macdSignal, adxSignal]
+  const signals = [rsiSignal, stochSignal, macdSignal, adxSignal, bbSignal, stSignal]
 
   let weightedScore = 0
   let totalWeight = 0
@@ -238,6 +319,12 @@ export function deriveTimeframeSnapshots(
       ema50: comp.ema50,
       sma200: comp.sma200,
       trendBias,
+      bbPercentB: comp.bbPercentB,
+      bbBandwidth: comp.bbBandwidth,
+      supertrendDirection: comp.supertrendDirection,
+      obv: comp.obv,
+      vwap: comp.vwap,
+      volatilityPercentile: comp.volatilityPercentile,
     }
   })
 }
@@ -272,6 +359,20 @@ export function getQualifiedSignals(snapshots: TimeframeSignalSnapshot[]): Quali
       details.push('ADX confirmed')
     }
 
+    if (snap.bbPercentB !== null) {
+      if (snap.bbPercentB <= 0.1) details.push(`BB oversold (%B ${(snap.bbPercentB * 100).toFixed(0)}%)`)
+      else if (snap.bbPercentB >= 0.9) details.push(`BB overbought (%B ${(snap.bbPercentB * 100).toFixed(0)}%)`)
+    }
+
+    if (snap.supertrendDirection !== null) {
+      details.push(`ST ${snap.supertrendDirection === 1 ? 'bullish' : 'bearish'}`)
+    }
+
+    if (snap.volatilityPercentile !== null) {
+      if (snap.volatilityPercentile >= 80) details.push(`High vol (${snap.volatilityPercentile.toFixed(0)}%ile)`)
+      else if (snap.volatilityPercentile <= 20) details.push(`Low vol squeeze (${snap.volatilityPercentile.toFixed(0)}%ile)`)
+    }
+
     qualified.push({
       timeframe: snap.timeframe,
       timeframeLabel: snap.timeframeLabel,
@@ -293,18 +394,20 @@ export function calculateMarkovPrior(candles: Candle[], lookback: number = 50): 
   if (candles.length < lookback + 2) return 0
 
   const recentCandles = candles.slice(-lookback)
-  let upCount = 0
-  let downCount = 0
+  let weightedUp = 0
+  let weightedDown = 0
+  let totalWeight = 0
 
   for (let i = 1; i < recentCandles.length; i++) {
-    if (recentCandles[i].close > recentCandles[i - 1].close) upCount++
-    else if (recentCandles[i].close < recentCandles[i - 1].close) downCount++
+    const weight = i / recentCandles.length // more recent = higher weight
+    const change = (recentCandles[i].close - recentCandles[i - 1].close) / recentCandles[i - 1].close
+    if (change > 0) weightedUp += weight * change
+    else weightedDown += weight * Math.abs(change)
+    totalWeight += weight
   }
 
-  const total = upCount + downCount
-  if (total === 0) return 0
-
-  return (upCount - downCount) / total
+  if (totalWeight === 0) return 0
+  return ((weightedUp - weightedDown) / totalWeight) * 100
 }
 
 // ─── Multi-Timeframe Markov Priors ──────────────────────────────────────────
@@ -317,4 +420,56 @@ export function calculateMultiTimeframeMarkovPriors(
     priors[tf] = calculateMarkovPrior(candles)
   }
   return priors
+}
+
+// ─── Multi-Timeframe Confluence ─────────────────────────────────────────────
+
+const TF_WEIGHTS: Record<string, number> = {
+  '5': 1, '15': 1.5, '30': 2, '60': 3, '120': 4, '240': 5, '360': 6,
+}
+
+export function deriveMultiTimeframeConfluence(
+  snapshots: TimeframeSignalSnapshot[]
+): MultiTimeframeConfluence {
+  let weightedLong = 0
+  let weightedShort = 0
+  let totalWeight = 0
+  let longCount = 0
+  let shortCount = 0
+  let neutralCount = 0
+
+  for (const snap of snapshots) {
+    const weight = TF_WEIGHTS[snap.timeframe] ?? 1
+    if (snap.signal.direction === 'long') {
+      weightedLong += weight * snap.signal.confidence
+      longCount++
+    } else if (snap.signal.direction === 'short') {
+      weightedShort += weight * snap.signal.confidence
+      shortCount++
+    } else {
+      neutralCount++
+    }
+    totalWeight += weight
+  }
+
+  const score = totalWeight > 0 ? (weightedLong - weightedShort) / totalWeight : 0
+  const direction: SignalDirection = score > 0.1 ? 'long' : score < -0.1 ? 'short' : 'neutral'
+  const dominant = Math.max(longCount, shortCount)
+  const alignmentRatio = snapshots.length > 0 ? dominant / snapshots.length : 0
+
+  let confluenceLevel: 'strong' | 'moderate' | 'weak' | 'mixed'
+  if (alignmentRatio >= 0.7 && dominant >= 4) confluenceLevel = 'strong'
+  else if (alignmentRatio >= 0.5 && dominant >= 3) confluenceLevel = 'moderate'
+  else if (dominant >= 2) confluenceLevel = 'weak'
+  else confluenceLevel = 'mixed'
+
+  return {
+    direction,
+    score,
+    alignmentRatio,
+    confluenceLevel,
+    longCount,
+    shortCount,
+    neutralCount,
+  }
 }

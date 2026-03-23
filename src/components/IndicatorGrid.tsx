@@ -4,6 +4,7 @@ interface IndicatorCardProps {
   label?: string
   color?: 'green' | 'yellow' | 'orange' | 'red' | 'neutral'
   subtitle?: string
+  format?: (v: number) => string
 }
 
 const COLOR_CLASSES = {
@@ -21,14 +22,15 @@ function getColorForRSI(value: number): 'green' | 'yellow' | 'orange' | 'red' {
   return 'green'
 }
 
-export function IndicatorCard({ title, value, label, color, subtitle }: IndicatorCardProps) {
+export function IndicatorCard({ title, value, label, color, subtitle, format }: IndicatorCardProps) {
   const resolvedColor = color ?? (value !== null ? getColorForRSI(value) : 'neutral')
+  const displayValue = value !== null ? (format ? format(value) : value.toFixed(2)) : '—'
 
   return (
     <div className={`glass-panel p-4 border ${COLOR_CLASSES[resolvedColor]} transition-all duration-300`}>
       <div className="text-xs font-medium text-muted-foreground mb-1">{title}</div>
       <div className="text-2xl font-bold tracking-tight text-foreground">
-        {value !== null ? value.toFixed(2) : '—'}
+        {displayValue}
       </div>
       {label && (
         <div className="text-xs text-muted-foreground mt-1">{label}</div>
@@ -47,11 +49,17 @@ interface IndicatorGridProps {
   macdLine: number | null
   macdSignal: number | null
   macdHistogram: number | null
+  bbPercentB?: number | null
+  supertrendDirection?: 1 | -1 | null
+  volatilityPercentile?: number | null
 }
 
-export function IndicatorGrid({ rsi, stochK, stochD, macdLine, macdSignal, macdHistogram }: IndicatorGridProps) {
+export function IndicatorGrid({
+  rsi, stochK, stochD, macdLine, macdSignal, macdHistogram,
+  bbPercentB, supertrendDirection, volatilityPercentile,
+}: IndicatorGridProps) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-3 mb-6">
       <IndicatorCard
         title="RSI"
         value={rsi}
@@ -81,6 +89,27 @@ export function IndicatorGrid({ rsi, stochK, stochD, macdLine, macdSignal, macdH
         title="Histogram"
         value={macdHistogram}
         color={macdHistogram !== null ? (macdHistogram > 0 ? 'green' : 'red') : 'neutral'}
+      />
+      <IndicatorCard
+        title="BB %B"
+        value={bbPercentB !== undefined ? bbPercentB : null}
+        format={v => `${(v * 100).toFixed(0)}%`}
+        color={bbPercentB != null ? (bbPercentB <= 0.1 ? 'green' : bbPercentB >= 0.9 ? 'red' : 'neutral') : 'neutral'}
+        label={bbPercentB != null ? (bbPercentB <= 0.1 ? 'Near Lower' : bbPercentB >= 0.9 ? 'Near Upper' : 'Mid Band') : undefined}
+      />
+      <IndicatorCard
+        title="Supertrend"
+        value={supertrendDirection !== undefined && supertrendDirection !== null ? supertrendDirection : null}
+        format={v => v === 1 ? 'BULL' : 'BEAR'}
+        color={supertrendDirection === 1 ? 'green' : supertrendDirection === -1 ? 'red' : 'neutral'}
+        label={supertrendDirection === 1 ? 'Uptrend' : supertrendDirection === -1 ? 'Downtrend' : undefined}
+      />
+      <IndicatorCard
+        title="Vol %ile"
+        value={volatilityPercentile !== undefined ? volatilityPercentile : null}
+        format={v => `${v.toFixed(0)}%`}
+        color={volatilityPercentile != null ? (volatilityPercentile >= 80 ? 'red' : volatilityPercentile <= 20 ? 'yellow' : 'neutral') : 'neutral'}
+        label={volatilityPercentile != null ? (volatilityPercentile >= 80 ? 'High Vol' : volatilityPercentile <= 20 ? 'Squeeze' : 'Normal') : undefined}
       />
     </div>
   )

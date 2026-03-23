@@ -5,6 +5,7 @@ interface MarketSummaryProps {
   high24h?: number
   low24h?: number
   volume24h?: number
+  fundingRate?: number | null
 }
 
 function formatPrice(price: number): string {
@@ -13,9 +14,15 @@ function formatPrice(price: number): string {
   return price.toFixed(6)
 }
 
-export function MarketSummary({ symbol, price, priceChange }: MarketSummaryProps) {
+export function MarketSummary({ symbol, price, priceChange, fundingRate }: MarketSummaryProps) {
   const isPositive = priceChange && priceChange.difference >= 0
   const changeColor = isPositive ? 'text-momentum-green' : 'text-momentum-red'
+
+  const fundingColor = fundingRate != null
+    ? Math.abs(fundingRate) >= 0.0005
+      ? 'text-red-400'
+      : fundingRate > 0 ? 'text-yellow-400' : 'text-green-400'
+    : 'text-muted-foreground'
 
   return (
     <div className="glass-panel p-6 mb-6">
@@ -46,6 +53,17 @@ export function MarketSummary({ symbol, price, priceChange }: MarketSummaryProps
             <div className="h-12 w-48 bg-muted/30 rounded-lg animate-pulse" />
           )}
         </div>
+        {fundingRate != null && (
+          <div className="text-right">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Funding Rate</div>
+            <div className={`text-lg font-bold ${fundingColor}`}>
+              {(fundingRate * 100).toFixed(4)}%
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              {fundingRate > 0 ? 'Longs pay' : 'Shorts pay'}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
