@@ -3,12 +3,15 @@ import { MainLayout } from '../layouts/MainLayout'
 import { ControlBar } from '../components/ControlBar'
 import { DashboardView } from '../components/DashboardView'
 import { NotificationDialog } from '../components/NotificationDialog'
-import { useMarketData, useMultiFrameMarketData, useTickerData } from '../hooks/useMarketData'
+import { useMarketData, useMultiFrameMarketData, useTickerData, useOpenInterestData } from '../hooks/useMarketData'
 import {
   calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI,
   calculateMACD, calculateADX, calculateATR,
   calculateBollingerBands, calculateSupertrend, calculateOBV, calculateVWAP,
   calculateVolatilityPercentile,
+  calculateHurstExponent, calculateZScore, calculateLinearRegression,
+  calculateKAMA, calculateAutocorrelation, detectVolumeSpikes,
+  calculateOIDivergence,
 } from '../lib/indicators'
 import {
   deriveTimeframeSnapshots, getQualifiedSignals,
@@ -17,6 +20,8 @@ import {
 } from '../lib/signals'
 import { createNotificationId, showBrowserNotification, getCooldown, playNotificationSound, getTimeframePriority } from '../lib/notifications'
 import { calculateRiskLevels } from '../lib/risk'
+import { createInitialBayesianState, updateBayesianAccuracy } from '../lib/bayesian'
+import type { BayesianState } from '../lib/bayesian'
 import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, SignalNotification, DivergenceNotification } from '../types/app'
 import type { TimeframeSignalSnapshot } from '../types/signals'
 
@@ -167,6 +172,9 @@ const Index = () => {
   )
   const prevCrossRef = useRef<Record<string, 'golden' | 'death' | null>>({})
 
+  // Bayesian state for accuracy tracking
+  const bayesianStateRef = useRef<BayesianState>(createInitialBayesianState())
+
   // Persist notifications to localStorage
   useEffect(() => {
     localStorage.setItem('momentum-notifications', JSON.stringify(momentumNotifications.slice(0, 50)))
@@ -198,6 +206,9 @@ const Index = () => {
 
   // Ticker data (funding rate, etc.)
   const { data: tickerData } = useTickerData(symbol, refreshInterval, true)
+
+  // Open Interest data
+  const { data: oiData } = useOpenInterestData(symbol, timeframe, refreshInterval, true)
 
   const lastUpdated = useMemo(() => {
     if (!candles?.length) return ''
@@ -240,12 +251,27 @@ const Index = () => {
   const adxResult = useMemo(() => candles ? calculateADX(candles, 14) : { adx: [], diPlus: [], diMinus: [] }, [candles])
   const atrValues = useMemo(() => candles ? calculateATR(candles, 14) : [], [candles])
 
-  // New primary indicators
+  // Phase 1 primary indicators
   const bbResult = useMemo(() => calculateBollingerBands(closes, 20, 2), [closes])
   const stResult = useMemo(() => candles ? calculateSupertrend(candles, 10, 3) : { supertrend: [], direction: [] }, [candles])
   const obvValues = useMemo(() => candles ? calculateOBV(candles) : [], [candles])
   const obvEmaValues = useMemo(() => calculateEMA(obvValues, 20), [obvValues])
   const vwapValues = useMemo(() => candles ? calculateVWAP(candles) : [], [candles])
+
+  // Phase 2 advanced indicators (primary TF)
+  const hurstExponent = useMemo(() => calculateHurstExponent(closes), [closes])
+  const zScoreValues = useMemo(() => calculateZScore(closes), [closes])
+  const linRegResult = useMemo(() => calculateLinearRegression(closes), [closes])
+  const kamaValues = useMemo(() => calculateKAMA(closes), [closes])
+  const autocorrelation = useMemo(() => calculateAutocorrelation(closes), [closes])
+  const volumeSpikes = useMemo(() => candles ? detectVolumeSpikes(candles) : [], [candles])
+
+  // OI Divergence for primary TF
+  const oiDivergence = useMemo(() => {
+    if (!oiData || oiData.length < 10) return null
+    const oiValues = oiData.map(d => d.openInterest)
+    return calculateOIDivergence(closes, oiValues)
+  }, [closes, oiData])
 
   const latestRSI = rsiValues[rsiValues.length - 1] ?? null
   const latestStochK = stochastic.kValues[stochastic.kValues.length - 1] ?? null
@@ -258,6 +284,14 @@ const Index = () => {
   const latestBBBandwidth = bbResult.bandwidth[bbResult.bandwidth.length - 1] ?? null
   const latestSTDir = stResult.direction[stResult.direction.length - 1] ?? null
   const latestVolPercentile = useMemo(() => calculateVolatilityPercentile(atrValues), [atrValues])
+  const latestZScore = zScoreValues[zScoreValues.length - 1] ?? null
+  const latestRSquared = linRegResult.rSquared[linRegResult.rSquared.length - 1] ?? null
+  const latestKAMA = kamaValues[kamaValues.length - 1] ?? null
+  const latestVolumeSpikeRatio = useMemo(() => {
+    if (!volumeSpikes.length) return null
+    const lastSpike = volumeSpikes[volumeSpikes.length - 1]
+    return lastSpike?.ratio ?? null
+  }, [volumeSpikes])
 
   // ─── Risk Levels ──────────────────────────────────────────────────────────
 
@@ -294,6 +328,14 @@ const Index = () => {
         const tfVWAP = calculateVWAP(r.candles)
         const tfVolPct = calculateVolatilityPercentile(tfAtr)
 
+        // Advanced indicators per timeframe
+        const tfHurst = calculateHurstExponent(c)
+        const tfZScore = calculateZScore(c)
+        const tfLinReg = calculateLinearRegression(c)
+        const tfKAMA = calculateKAMA(c)
+        const tfAutocorr = calculateAutocorrelation(c)
+        const tfVolSpikes = detectVolumeSpikes(r.candles)
+
         return {
           symbol,
           timeframe: r.timeframe,
@@ -323,9 +365,44 @@ const Index = () => {
           vwap: tfVWAP[tfVWAP.length - 1] ?? null,
           volatilityPercentile: tfVolPct,
           fundingRate: tickerData?.fundingRate ?? null,
+          // Advanced fields
+          hurstExponent: tfHurst,
+          zScore: tfZScore[tfZScore.length - 1] ?? null,
+          rSquared: tfLinReg.rSquared[tfLinReg.rSquared.length - 1] ?? null,
+          linearRegressionSlope: tfLinReg.slope[tfLinReg.slope.length - 1] ?? null,
+          kama: tfKAMA[tfKAMA.length - 1] ?? null,
+          autocorrelation: tfAutocorr,
+          oiDivergence: null, // OI divergence only available for primary TF
+          volumeSpikeRatio: tfVolSpikes.length > 0 ? tfVolSpikes[tfVolSpikes.length - 1]?.ratio ?? null : null,
         }
       })
   }, [multiFrameResults, symbol, tickerData])
+
+  // ─── Bayesian Accuracy Updates ─────────────────────────────────────────────
+
+  useEffect(() => {
+    if (computations.length === 0) return
+
+    for (const comp of computations) {
+      if (!comp.candles.length || comp.candles.length < 10) continue
+      const len = comp.candles.length
+      // Use 5-bar forward return as the "actual" for accuracy tracking
+      if (len < 6) continue
+      const prevClose = comp.candles[len - 6].close
+      const currClose = comp.candles[len - 1].close
+      const actualReturn = currClose - prevClose
+
+      const snapshot = snapshots.find(s => s.timeframe === comp.timeframe)
+      if (snapshot) {
+        bayesianStateRef.current = updateBayesianAccuracy(
+          bayesianStateRef.current,
+          snapshot.signal.signals,
+          actualReturn,
+          len
+        )
+      }
+    }
+  }, [computations])
 
   // ─── Markov Priors ────────────────────────────────────────────────────────
 
@@ -340,13 +417,16 @@ const Index = () => {
   // ─── Signal Derivation ────────────────────────────────────────────────────
 
   const snapshots = useMemo<TimeframeSignalSnapshot[]>(
-    () => deriveTimeframeSnapshots(computations, markovPriors),
+    () => deriveTimeframeSnapshots(computations, markovPriors, bayesianStateRef.current),
     [computations, markovPriors]
   )
 
   const qualifiedSignals = useMemo(() => getQualifiedSignals(snapshots), [snapshots])
 
-  const confluence = useMemo(() => deriveMultiTimeframeConfluence(snapshots), [snapshots])
+  const confluence = useMemo(
+    () => deriveMultiTimeframeConfluence(snapshots, bayesianStateRef.current),
+    [snapshots]
+  )
 
   // ─── Multi-TF MA Cross Detection ─────────────────────────────────────────
 
@@ -539,6 +619,7 @@ const Index = () => {
   useEffect(() => {
     prevCrossRef.current = {}
     prevFundingRef.current = null
+    bayesianStateRef.current = createInitialBayesianState()
   }, [symbol])
 
   const allNotifIds = useMemo(() => {
@@ -646,6 +727,13 @@ const Index = () => {
         volatilityPercentile={latestVolPercentile}
         riskLevels={riskLevels}
         fundingRate={tickerData?.fundingRate ?? null}
+        hurstExponent={hurstExponent}
+        zScore={latestZScore}
+        rSquared={latestRSquared}
+        kama={kamaValues}
+        autocorrelation={autocorrelation}
+        oiDivergence={oiDivergence}
+        volumeSpikeRatio={latestVolumeSpikeRatio}
       />
 
       {isError && (

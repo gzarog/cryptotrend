@@ -10,6 +10,9 @@ import type {
   QualifiedSignal,
 } from '../types/signals'
 import { detectDivergences } from './divergence'
+import { getRecentPatterns } from './patterns'
+import type { BayesianState } from './bayesian'
+import { getBayesianWeight } from './bayesian'
 
 
 
@@ -215,6 +218,179 @@ export function deriveDivergenceSignals(
   return signals
 }
 
+// ─── Funding Rate Signal ────────────────────────────────────────────────────
+
+function deriveFundingSignal(fundingRate: number | null): TradingSignal {
+  if (fundingRate === null) return { direction: 'neutral', strength: 'none', confidence: 0, label: 'Funding N/A', source: 'funding' }
+
+  const absRate = Math.abs(fundingRate)
+  let direction: SignalDirection = 'neutral'
+  let confidence = 0
+
+  // Contrarian: high positive funding = longs overleveraged = bearish
+  if (fundingRate > 0.001) { direction = 'short'; confidence = 0.7 }
+  else if (fundingRate > 0.0005) { direction = 'short'; confidence = 0.5 }
+  else if (fundingRate > 0.0003) { direction = 'short'; confidence = 0.3 }
+  // High negative funding = shorts overleveraged = bullish
+  else if (fundingRate < -0.0005) { direction = 'long'; confidence = 0.6 }
+  else if (fundingRate < -0.0003) { direction = 'long'; confidence = 0.4 }
+  else { confidence = 0.1 }
+
+  return {
+    direction,
+    strength: confidenceToStrength(confidence),
+    confidence,
+    label: `Funding ${(fundingRate * 100).toFixed(4)}%`,
+    source: 'funding',
+  }
+}
+
+// ─── OI Divergence Signal ───────────────────────────────────────────────────
+
+function deriveOIDivergenceSignal(oiDivergence: number | null): TradingSignal {
+  if (oiDivergence === null) return { direction: 'neutral', strength: 'none', confidence: 0, label: 'OI N/A', source: 'oi' }
+
+  const abs = Math.abs(oiDivergence)
+  const direction: SignalDirection = oiDivergence > 0.1 ? 'long' : oiDivergence < -0.1 ? 'short' : 'neutral'
+  const confidence = Math.min(abs, 0.8)
+
+  return {
+    direction,
+    strength: confidenceToStrength(confidence),
+    confidence,
+    label: `OI div ${oiDivergence.toFixed(2)}`,
+    source: 'oi',
+  }
+}
+
+// ─── Z-Score Signal ─────────────────────────────────────────────────────────
+
+function deriveZScoreSignal(zScore: number | null): TradingSignal {
+  if (zScore === null) return { direction: 'neutral', strength: 'none', confidence: 0, label: 'Z N/A', source: 'zscore' }
+
+  let direction: SignalDirection = 'neutral'
+  let confidence = 0
+
+  if (zScore <= -2.5) { direction = 'long'; confidence = 0.85 }
+  else if (zScore <= -2.0) { direction = 'long'; confidence = 0.7 }
+  else if (zScore <= -1.5) { direction = 'long'; confidence = 0.45 }
+  else if (zScore >= 2.5) { direction = 'short'; confidence = 0.85 }
+  else if (zScore >= 2.0) { direction = 'short'; confidence = 0.7 }
+  else if (zScore >= 1.5) { direction = 'short'; confidence = 0.45 }
+  else { confidence = 0.1 }
+
+  return {
+    direction,
+    strength: confidenceToStrength(confidence),
+    confidence,
+    label: `Z-Score ${zScore.toFixed(2)}`,
+    source: 'zscore',
+  }
+}
+
+// ─── OBV Signal ─────────────────────────────────────────────────────────────
+
+function deriveOBVSignal(obv: number | null, obvEma: number | null): TradingSignal {
+  if (obv === null || obvEma === null) return { direction: 'neutral', strength: 'none', confidence: 0, label: 'OBV N/A', source: 'obv' }
+
+  const direction: SignalDirection = obv > obvEma ? 'long' : obv < obvEma ? 'short' : 'neutral'
+  const diff = obvEma !== 0 ? Math.abs(obv - obvEma) / Math.abs(obvEma) : 0
+  const confidence = Math.min(diff * 5, 0.6)
+
+  return {
+    direction,
+    strength: confidenceToStrength(confidence),
+    confidence,
+    label: `OBV ${direction === 'long' ? '>' : '<'} EMA`,
+    source: 'obv',
+  }
+}
+
+// ─── VWAP Signal ────────────────────────────────────────────────────────────
+
+function deriveVWAPSignal(close: number | null, vwap: number | null): TradingSignal {
+  if (close === null || vwap === null) return { direction: 'neutral', strength: 'none', confidence: 0, label: 'VWAP N/A', source: 'vwap' }
+
+  const direction: SignalDirection = close > vwap ? 'long' : close < vwap ? 'short' : 'neutral'
+  const deviation = Math.abs(close - vwap) / vwap
+  const confidence = Math.min(deviation * 20, 0.55)
+
+  return {
+    direction,
+    strength: confidenceToStrength(confidence),
+    confidence,
+    label: `Price ${direction === 'long' ? '>' : '<'} VWAP`,
+    source: 'vwap',
+  }
+}
+
+// ─── Candlestick Pattern Signal ─────────────────────────────────────────────
+
+function derivePatternSignal(candles: Candle[]): TradingSignal {
+  if (candles.length < 5) return { direction: 'neutral', strength: 'none', confidence: 0, label: 'Pattern N/A', source: 'pattern' }
+
+  const recent = getRecentPatterns(candles, 3)
+  if (recent.length === 0) return { direction: 'neutral', strength: 'none', confidence: 0, label: 'No pattern', source: 'pattern' }
+
+  // Use the strongest recent pattern
+  const strongest = recent.reduce((best, p) => p.strength > best.strength ? p : best, recent[0])
+  const direction: SignalDirection = strongest.type === 'bullish' ? 'long' : 'short'
+
+  return {
+    direction,
+    strength: confidenceToStrength(strongest.strength),
+    confidence: strongest.strength,
+    label: strongest.name,
+    source: 'pattern',
+  }
+}
+
+// ─── Regime Weights ─────────────────────────────────────────────────────────
+
+type RegimeWeights = Record<string, number>
+
+function calculateRegimeWeights(hurst: number | null, adx: number | null, volPct: number | null): RegimeWeights {
+  // Default weights (neutral regime)
+  const weights: RegimeWeights = {
+    rsi: 1.0, stoch: 1.0, macd: 1.0, adx: 1.0, bb: 1.0, supertrend: 1.0,
+    funding: 1.0, oi: 1.0, zscore: 1.0, obv: 1.0, vwap: 1.0, pattern: 1.0,
+    'divergence-rsi': 1.0, 'divergence-macd': 1.0,
+  }
+
+  if (hurst !== null) {
+    if (hurst > 0.6) {
+      // Trending: boost trend-following, reduce mean-reversion
+      weights.macd *= 1.3
+      weights.supertrend *= 1.3
+      weights.adx *= 1.2
+      weights.rsi *= 0.7
+      weights.bb *= 0.7
+      weights.zscore *= 0.7
+    } else if (hurst < 0.4) {
+      // Mean-reverting: boost mean-reversion, reduce trend-following
+      weights.rsi *= 1.3
+      weights.bb *= 1.3
+      weights.zscore *= 1.3
+      weights.macd *= 0.7
+      weights.supertrend *= 0.7
+    } else {
+      // Random walk: reduce all confidence
+      for (const key of Object.keys(weights)) {
+        weights[key] *= 0.8
+      }
+    }
+  }
+
+  // High volatility: boost volume and funding signals
+  if (volPct !== null && volPct >= 80) {
+    weights.obv *= 1.2
+    weights.funding *= 1.3
+    weights.oi *= 1.2
+  }
+
+  return weights
+}
+
 // ─── Trend Bias ─────────────────────────────────────────────────────────────
 
 export function deriveTrendBias(comp: MomentumComputation): TrendBias {
@@ -246,7 +422,11 @@ export function deriveTrendBias(comp: MomentumComputation): TrendBias {
 
 // ─── Combined Signal ────────────────────────────────────────────────────────
 
-export function deriveCombinedSignal(comp: MomentumComputation, markovPrior: number = 0): CombinedSignal {
+export function deriveCombinedSignal(
+  comp: MomentumComputation,
+  markovPrior: number = 0,
+  bayesianState?: BayesianState
+): CombinedSignal {
   const rsiSignal = deriveRSISignal(comp.rsi)
   const stochSignal = deriveStochSignal(comp.stochK, comp.stochD)
   const macdSignal = deriveMACDSignal(comp.macdLine, comp.macdSignal, comp.macdHistogram)
@@ -258,15 +438,33 @@ export function deriveCombinedSignal(comp: MomentumComputation, markovPrior: num
   const bbSignal = deriveBBSignal(comp.bbPercentB, comp.bbBandwidth)
   const stSignal = deriveSupertrendSignal(comp.supertrendDirection)
 
-  const signals = [rsiSignal, stochSignal, macdSignal, adxSignal, bbSignal, stSignal]
+  // New advanced signals
+  const fundingSignal = deriveFundingSignal(comp.fundingRate)
+  const oiSignal = deriveOIDivergenceSignal(comp.oiDivergence)
+  const zScoreSignal = deriveZScoreSignal(comp.zScore)
+  const obvSignal = deriveOBVSignal(comp.obv, comp.obvEma)
+  const vwapSignal = deriveVWAPSignal(comp.close, comp.vwap)
+  const patternSignal = derivePatternSignal(comp.candles)
+
+  const signals = [
+    rsiSignal, stochSignal, macdSignal, adxSignal, bbSignal, stSignal,
+    fundingSignal, oiSignal, zScoreSignal, obvSignal, vwapSignal, patternSignal,
+  ]
+
+  // Regime-adaptive weights
+  const regimeWeights = calculateRegimeWeights(comp.hurstExponent, comp.adx, comp.volatilityPercentile)
 
   let weightedScore = 0
   let totalWeight = 0
 
   for (const sig of signals) {
+    const regimeW = regimeWeights[sig.source] ?? 1.0
+    const bayesW = bayesianState ? getBayesianWeight(bayesianState, sig.source) : 1.0
+    const combinedWeight = regimeW * bayesW
+
     const dirMultiplier = sig.direction === 'long' ? 1 : sig.direction === 'short' ? -1 : 0
-    weightedScore += dirMultiplier * sig.confidence
-    totalWeight += sig.confidence || 0.1
+    weightedScore += dirMultiplier * sig.confidence * combinedWeight
+    totalWeight += (sig.confidence || 0.1) * combinedWeight
   }
 
   // Apply Markov prior
@@ -295,11 +493,12 @@ export function deriveCombinedSignal(comp: MomentumComputation, markovPrior: num
 
 export function deriveTimeframeSnapshots(
   computations: MomentumComputation[],
-  markovPriors: Record<string, number> = {}
+  markovPriors: Record<string, number> = {},
+  bayesianState?: BayesianState
 ): TimeframeSignalSnapshot[] {
   return computations.map((comp) => {
     const prior = markovPriors[comp.timeframe] ?? 0
-    const signal = deriveCombinedSignal(comp, prior)
+    const signal = deriveCombinedSignal(comp, prior, bayesianState)
     const trendBias = deriveTrendBias(comp)
 
     return {
@@ -325,6 +524,14 @@ export function deriveTimeframeSnapshots(
       obv: comp.obv,
       vwap: comp.vwap,
       volatilityPercentile: comp.volatilityPercentile,
+      hurstExponent: comp.hurstExponent,
+      zScore: comp.zScore,
+      rSquared: comp.rSquared,
+      linearRegressionSlope: comp.linearRegressionSlope,
+      kama: comp.kama,
+      autocorrelation: comp.autocorrelation,
+      oiDivergence: comp.oiDivergence,
+      volumeSpikeRatio: comp.volumeSpikeRatio,
     }
   })
 }
@@ -371,6 +578,23 @@ export function getQualifiedSignals(snapshots: TimeframeSignalSnapshot[]): Quali
     if (snap.volatilityPercentile !== null) {
       if (snap.volatilityPercentile >= 80) details.push(`High vol (${snap.volatilityPercentile.toFixed(0)}%ile)`)
       else if (snap.volatilityPercentile <= 20) details.push(`Low vol squeeze (${snap.volatilityPercentile.toFixed(0)}%ile)`)
+    }
+
+    if (snap.hurstExponent !== null) {
+      if (snap.hurstExponent > 0.6) details.push(`Trending (H=${snap.hurstExponent.toFixed(2)})`)
+      else if (snap.hurstExponent < 0.4) details.push(`Mean-reverting (H=${snap.hurstExponent.toFixed(2)})`)
+    }
+
+    if (snap.zScore !== null && Math.abs(snap.zScore) >= 1.5) {
+      details.push(`Z-Score ${snap.zScore.toFixed(2)}`)
+    }
+
+    if (snap.rSquared !== null && snap.rSquared > 0.7) {
+      details.push(`Strong trend (R²=${snap.rSquared.toFixed(2)})`)
+    }
+
+    if (snap.oiDivergence !== null && Math.abs(snap.oiDivergence) > 0.1) {
+      details.push(`OI div ${snap.oiDivergence.toFixed(2)}`)
     }
 
     qualified.push({
@@ -429,7 +653,8 @@ const TF_WEIGHTS: Record<string, number> = {
 }
 
 export function deriveMultiTimeframeConfluence(
-  snapshots: TimeframeSignalSnapshot[]
+  snapshots: TimeframeSignalSnapshot[],
+  bayesianState?: BayesianState
 ): MultiTimeframeConfluence {
   let weightedLong = 0
   let weightedShort = 0
@@ -439,7 +664,22 @@ export function deriveMultiTimeframeConfluence(
   let neutralCount = 0
 
   for (const snap of snapshots) {
-    const weight = TF_WEIGHTS[snap.timeframe] ?? 1
+    let weight = TF_WEIGHTS[snap.timeframe] ?? 1
+
+    // Hurst boost: trending markets get higher TF weight boost
+    if (snap.hurstExponent !== null) {
+      if (snap.hurstExponent > 0.6) weight *= 1.2
+      else if (snap.hurstExponent < 0.4) weight *= 0.9
+    }
+
+    // Bayesian accuracy: boost weight if signals from this TF have been accurate
+    if (bayesianState) {
+      const avgBayes = snap.signal.signals.reduce((sum, sig) =>
+        sum + getBayesianWeight(bayesianState, sig.source), 0
+      ) / Math.max(snap.signal.signals.length, 1)
+      weight *= Math.min(avgBayes, 1.5)
+    }
+
     if (snap.signal.direction === 'long') {
       weightedLong += weight * snap.signal.confidence
       longCount++

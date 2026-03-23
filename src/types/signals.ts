@@ -65,6 +65,16 @@ export type TimeframeSignalSnapshot = {
   obv: number | null
   vwap: number | null
   volatilityPercentile: number | null
+
+  // Advanced indicator fields
+  hurstExponent: number | null
+  zScore: number | null
+  rSquared: number | null
+  linearRegressionSlope: number | null
+  kama: number | null
+  autocorrelation: number | null
+  oiDivergence: number | null
+  volumeSpikeRatio: number | null
 }
 
 export type TrendBias = {

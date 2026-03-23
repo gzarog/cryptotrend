@@ -52,14 +52,19 @@ interface IndicatorGridProps {
   bbPercentB?: number | null
   supertrendDirection?: 1 | -1 | null
   volatilityPercentile?: number | null
+  hurstExponent?: number | null
+  zScore?: number | null
+  rSquared?: number | null
+  oiDivergence?: number | null
 }
 
 export function IndicatorGrid({
   rsi, stochK, stochD, macdLine, macdSignal, macdHistogram,
   bbPercentB, supertrendDirection, volatilityPercentile,
+  hurstExponent, zScore, rSquared, oiDivergence,
 }: IndicatorGridProps) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-3 mb-6">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-13 gap-3 mb-6">
       <IndicatorCard
         title="RSI"
         value={rsi}
@@ -110,6 +115,34 @@ export function IndicatorGrid({
         format={v => `${v.toFixed(0)}%`}
         color={volatilityPercentile != null ? (volatilityPercentile >= 80 ? 'red' : volatilityPercentile <= 20 ? 'yellow' : 'neutral') : 'neutral'}
         label={volatilityPercentile != null ? (volatilityPercentile >= 80 ? 'High Vol' : volatilityPercentile <= 20 ? 'Squeeze' : 'Normal') : undefined}
+      />
+      <IndicatorCard
+        title="Hurst"
+        value={hurstExponent !== undefined ? hurstExponent : null}
+        format={v => v.toFixed(3)}
+        color={hurstExponent != null ? (hurstExponent > 0.6 ? 'green' : hurstExponent < 0.4 ? 'yellow' : 'neutral') : 'neutral'}
+        label={hurstExponent != null ? (hurstExponent > 0.6 ? 'Trending' : hurstExponent < 0.4 ? 'Mean-Rev' : 'Random') : undefined}
+      />
+      <IndicatorCard
+        title="Z-Score"
+        value={zScore !== undefined ? zScore : null}
+        format={v => v.toFixed(2)}
+        color={zScore != null ? (Math.abs(zScore) >= 2.0 ? 'red' : Math.abs(zScore) >= 1.5 ? 'yellow' : 'neutral') : 'neutral'}
+        label={zScore != null ? (zScore <= -2.0 ? 'Oversold' : zScore >= 2.0 ? 'Overbought' : 'Normal') : undefined}
+      />
+      <IndicatorCard
+        title="R²"
+        value={rSquared !== undefined ? rSquared : null}
+        format={v => v.toFixed(2)}
+        color={rSquared != null ? (rSquared > 0.7 ? 'green' : rSquared < 0.3 ? 'yellow' : 'neutral') : 'neutral'}
+        label={rSquared != null ? (rSquared > 0.7 ? 'Clean Trend' : rSquared < 0.3 ? 'Choppy' : 'Moderate') : undefined}
+      />
+      <IndicatorCard
+        title="OI Div"
+        value={oiDivergence !== undefined ? oiDivergence : null}
+        format={v => v.toFixed(2)}
+        color={oiDivergence != null ? (oiDivergence > 0.1 ? 'green' : oiDivergence < -0.1 ? 'red' : 'neutral') : 'neutral'}
+        label={oiDivergence != null ? (oiDivergence > 0.1 ? 'Bullish' : oiDivergence < -0.1 ? 'Bearish' : 'Neutral') : undefined}
       />
     </div>
   )

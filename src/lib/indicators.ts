@@ -474,3 +474,279 @@ export function calculateVolatilityPercentile(
   const belowCount = recent.filter(v => v <= current).length
   return (belowCount / recent.length) * 100
 }
+
+// ─── Hurst Exponent (Rescaled Range) ─────────────────────────────────────────
+
+export function calculateHurstExponent(closes: number[], maxWindow: number = 64): number | null {
+  if (closes.length < maxWindow + 1) return null
+
+  const returns: number[] = []
+  for (let i = 1; i < closes.length; i++) {
+    returns.push(Math.log(closes[i] / closes[i - 1]))
+  }
+
+  const windowSizes = [8, 16, 32, 64].filter(w => w <= maxWindow && w < returns.length)
+  if (windowSizes.length < 2) return null
+
+  const logN: number[] = []
+  const logRS: number[] = []
+
+  for (const n of windowSizes) {
+    const rsValues: number[] = []
+    const numSegments = Math.floor(returns.length / n)
+    if (numSegments < 1) continue
+
+    for (let seg = 0; seg < numSegments; seg++) {
+      const segment = returns.slice(seg * n, (seg + 1) * n)
+      const mean = segment.reduce((a, b) => a + b, 0) / n
+      const deviations = segment.map(r => r - mean)
+
+      // Cumulative deviations
+      let cumSum = 0
+      let maxCum = -Infinity
+      let minCum = Infinity
+      for (const d of deviations) {
+        cumSum += d
+        if (cumSum > maxCum) maxCum = cumSum
+        if (cumSum < minCum) minCum = cumSum
+      }
+
+      const range = maxCum - minCum
+      const stdDev = Math.sqrt(segment.reduce((s, r) => s + (r - mean) ** 2, 0) / n)
+
+      if (stdDev > 0) rsValues.push(range / stdDev)
+    }
+
+    if (rsValues.length > 0) {
+      const avgRS = rsValues.reduce((a, b) => a + b, 0) / rsValues.length
+      logN.push(Math.log(n))
+      logRS.push(Math.log(avgRS))
+    }
+  }
+
+  if (logN.length < 2) return null
+
+  // Linear regression: slope = Hurst exponent
+  const n = logN.length
+  const sumX = logN.reduce((a, b) => a + b, 0)
+  const sumY = logRS.reduce((a, b) => a + b, 0)
+  const sumXY = logN.reduce((s, x, i) => s + x * logRS[i], 0)
+  const sumX2 = logN.reduce((s, x) => s + x * x, 0)
+
+  const hurst = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
+  return Math.max(0, Math.min(1, hurst))
+}
+
+// ─── Z-Score ─────────────────────────────────────────────────────────────────
+
+export function calculateZScore(closes: number[], period: number = 20): Array<number | null> {
+  return closes.map((close, i) => {
+    if (i < period - 1) return null
+    const slice = closes.slice(i - period + 1, i + 1)
+    const mean = slice.reduce((a, b) => a + b, 0) / period
+    const variance = slice.reduce((s, v) => s + (v - mean) ** 2, 0) / period
+    const stdDev = Math.sqrt(variance)
+    return stdDev > 0 ? (close - mean) / stdDev : 0
+  })
+}
+
+// ─── Linear Regression + R-Squared ───────────────────────────────────────────
+
+export function calculateLinearRegression(
+  closes: number[],
+  period: number = 20
+): {
+  slope: Array<number | null>
+  rSquared: Array<number | null>
+  upperChannel: Array<number | null>
+  lowerChannel: Array<number | null>
+} {
+  const slopeArr: Array<number | null> = []
+  const r2Arr: Array<number | null> = []
+  const upperArr: Array<number | null> = []
+  const lowerArr: Array<number | null> = []
+
+  for (let i = 0; i < closes.length; i++) {
+    if (i < period - 1) {
+      slopeArr.push(null); r2Arr.push(null); upperArr.push(null); lowerArr.push(null)
+      continue
+    }
+
+    const y = closes.slice(i - period + 1, i + 1)
+    const n = y.length
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0
+    for (let j = 0; j < n; j++) {
+      sumX += j; sumY += y[j]; sumXY += j * y[j]; sumX2 += j * j; sumY2 += y[j] * y[j]
+    }
+
+    const denom = n * sumX2 - sumX * sumX
+    if (denom === 0) {
+      slopeArr.push(0); r2Arr.push(0); upperArr.push(closes[i]); lowerArr.push(closes[i])
+      continue
+    }
+
+    const slope = (n * sumXY - sumX * sumY) / denom
+    const intercept = (sumY - slope * sumX) / n
+
+    // R-squared
+    const ssRes = y.reduce((s, val, j) => s + (val - (intercept + slope * j)) ** 2, 0)
+    const meanY = sumY / n
+    const ssTot = y.reduce((s, val) => s + (val - meanY) ** 2, 0)
+    const rSq = ssTot > 0 ? 1 - ssRes / ssTot : 0
+
+    // Channel: regression line +/- stdDev of residuals
+    const residualStdDev = Math.sqrt(ssRes / n)
+    const regEnd = intercept + slope * (n - 1)
+
+    slopeArr.push(slope / closes[i]) // Normalize slope as % per bar
+    r2Arr.push(Math.max(0, Math.min(1, rSq)))
+    upperArr.push(regEnd + 2 * residualStdDev)
+    lowerArr.push(regEnd - 2 * residualStdDev)
+  }
+
+  return { slope: slopeArr, rSquared: r2Arr, upperChannel: upperArr, lowerChannel: lowerArr }
+}
+
+// ─── KAMA (Kaufman Adaptive Moving Average) ──────────────────────────────────
+
+export function calculateKAMA(
+  closes: number[],
+  erPeriod: number = 10,
+  fastSC: number = 2,
+  slowSC: number = 30
+): Array<number | null> {
+  if (closes.length < erPeriod + 1) return closes.map(() => null)
+
+  const fastConst = 2 / (fastSC + 1)
+  const slowConst = 2 / (slowSC + 1)
+  const kama: Array<number | null> = []
+
+  for (let i = 0; i < erPeriod; i++) kama.push(null)
+  kama.push(closes[erPeriod])
+
+  for (let i = erPeriod + 1; i < closes.length; i++) {
+    const change = Math.abs(closes[i] - closes[i - erPeriod])
+    let volatility = 0
+    for (let j = i - erPeriod + 1; j <= i; j++) {
+      volatility += Math.abs(closes[j] - closes[j - 1])
+    }
+
+    const er = volatility > 0 ? change / volatility : 0
+    const sc = (er * (fastConst - slowConst) + slowConst) ** 2
+    const prevKama = kama[i - 1]!
+    kama.push(prevKama + sc * (closes[i] - prevKama))
+  }
+
+  return kama
+}
+
+// ─── Autocorrelation of Returns ──────────────────────────────────────────────
+
+export function calculateAutocorrelation(closes: number[], lag: number = 1, window: number = 50): number | null {
+  if (closes.length < window + lag + 1) return null
+
+  const returns: number[] = []
+  for (let i = closes.length - window; i < closes.length; i++) {
+    returns.push((closes[i] - closes[i - 1]) / closes[i - 1])
+  }
+
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length
+  let numerator = 0
+  let denominator = 0
+
+  for (let i = lag; i < returns.length; i++) {
+    numerator += (returns[i] - mean) * (returns[i - lag] - mean)
+  }
+  for (let i = 0; i < returns.length; i++) {
+    denominator += (returns[i] - mean) ** 2
+  }
+
+  return denominator > 0 ? numerator / denominator : 0
+}
+
+// ─── Volume Spike Detection ──────────────────────────────────────────────────
+
+export type VolumeSpike = {
+  index: number
+  ratio: number // volume / average
+  direction: 'up' | 'down' // candle direction
+}
+
+export function detectVolumeSpikes(
+  candles: Candle[],
+  threshold: number = 3.0,
+  lookback: number = 20
+): VolumeSpike[] {
+  const spikes: VolumeSpike[] = []
+
+  for (let i = lookback; i < candles.length; i++) {
+    const avgVol = candles.slice(i - lookback, i).reduce((s, c) => s + c.volume, 0) / lookback
+    if (avgVol <= 0) continue
+
+    const ratio = candles[i].volume / avgVol
+    if (ratio >= threshold) {
+      spikes.push({
+        index: i,
+        ratio,
+        direction: candles[i].close >= candles[i].open ? 'up' : 'down',
+      })
+    }
+  }
+
+  return spikes
+}
+
+// ─── OI Divergence ───────────────────────────────────────────────────────────
+
+export function calculateOIDivergence(
+  closes: number[],
+  openInterest: number[],
+  lookback: number = 10
+): number | null {
+  if (closes.length < lookback || openInterest.length < lookback) return null
+
+  const priceChange = (closes[closes.length - 1] - closes[closes.length - lookback]) / closes[closes.length - lookback]
+  const oiChange = (openInterest[openInterest.length - 1] - openInterest[openInterest.length - lookback]) / (openInterest[openInterest.length - lookback] || 1)
+
+  // Positive = bullish alignment, Negative = divergence
+  // Price up + OI up = bullish (+), Price up + OI down = bearish (-)
+  // Price down + OI down = bullish (+, capitulation), Price down + OI up = bearish (-, new shorts)
+  if (priceChange > 0 && oiChange > 0) return 1 * Math.min(Math.abs(oiChange) * 10, 1)
+  if (priceChange > 0 && oiChange < 0) return -1 * Math.min(Math.abs(oiChange) * 10, 1)
+  if (priceChange < 0 && oiChange < 0) return 0.5 * Math.min(Math.abs(oiChange) * 10, 1)
+  if (priceChange < 0 && oiChange > 0) return -1 * Math.min(Math.abs(oiChange) * 10, 1)
+  return 0
+}
+
+// ─── Liquidation Level Estimation ────────────────────────────────────────────
+
+export type LiquidationLevel = {
+  price: number
+  leverage: number
+  side: 'long' | 'short'
+}
+
+export function estimateLiquidationLevels(
+  recentSwingHighs: number[],
+  recentSwingLows: number[],
+  maintenanceMarginRate: number = 0.005
+): LiquidationLevel[] {
+  const leverages = [5, 10, 25, 50, 100]
+  const levels: LiquidationLevel[] = []
+
+  for (const entryPrice of recentSwingLows.slice(-3)) {
+    for (const lev of leverages) {
+      const liqPrice = entryPrice * (1 - 1 / lev + maintenanceMarginRate)
+      if (liqPrice > 0) levels.push({ price: liqPrice, leverage: lev, side: 'long' })
+    }
+  }
+
+  for (const entryPrice of recentSwingHighs.slice(-3)) {
+    for (const lev of leverages) {
+      const liqPrice = entryPrice * (1 + 1 / lev - maintenanceMarginRate)
+      levels.push({ price: liqPrice, leverage: lev, side: 'short' })
+    }
+  }
+
+  return levels.sort((a, b) => a.price - b.price)
+}

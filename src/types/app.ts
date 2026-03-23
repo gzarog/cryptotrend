@@ -102,6 +102,16 @@ export type MomentumComputation = {
 
   // Funding rate (from ticker API)
   fundingRate: number | null
+
+  // Advanced indicators
+  hurstExponent: number | null
+  zScore: number | null
+  rSquared: number | null
+  linearRegressionSlope: number | null
+  kama: number | null
+  autocorrelation: number | null
+  oiDivergence: number | null
+  volumeSpikeRatio: number | null // latest bar volume / avg, null if no spike
 }
 
 export type SignalNotification = {

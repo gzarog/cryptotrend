@@ -181,3 +181,59 @@ export function useTickerData(
     placeholderData: (previousData) => previousData,
   })
 }
+
+// ─── Historical Open Interest ────────────────────────────────────────────────
+
+export type OIDataPoint = {
+  timestamp: number
+  openInterest: number
+}
+
+async function fetchBybitOpenInterest(symbol: string, interval: string, limit: number = 50): Promise<OIDataPoint[]> {
+  // OI endpoint supports: 5min, 15min, 30min, 1h, 4h, 1d
+  const oiIntervalMap: Record<string, string> = {
+    '5': '5min', '15': '15min', '30': '30min',
+    '60': '1h', '120': '4h', '240': '4h', '360': '4h',
+  }
+  const oiInterval = oiIntervalMap[interval] ?? '1h'
+
+  const url = new URL('https://api.bybit.com/v5/market/open-interest')
+  url.searchParams.set('category', 'linear')
+  url.searchParams.set('symbol', symbol)
+  url.searchParams.set('intervalTime', oiInterval)
+  url.searchParams.set('limit', Math.min(limit, 200).toString())
+
+  const response = await fetch(url.toString(), { headers: { Accept: 'application/json' } })
+  if (!response.ok) throw new Error(`OI fetch failed (${response.status})`)
+
+  const payload = await response.json()
+  if (payload.retCode !== 0 || !payload.result?.list) {
+    throw new Error(payload.retMsg || 'OI API error')
+  }
+
+  return payload.result.list
+    .map((entry: { timestamp: string; openInterest: string }) => ({
+      timestamp: parseInt(entry.timestamp),
+      openInterest: parseFloat(entry.openInterest),
+    }))
+    .sort((a: OIDataPoint, b: OIDataPoint) => a.timestamp - b.timestamp)
+}
+
+export function useOpenInterestData(
+  symbol: string,
+  timeframe: string,
+  refreshInterval: number | false,
+  enabled: boolean
+) {
+  const normalizedSymbol = symbol.trim().toUpperCase()
+
+  return useQuery<OIDataPoint[]>({
+    queryKey: ['bybit-oi', normalizedSymbol, timeframe],
+    queryFn: () => fetchBybitOpenInterest(normalizedSymbol, timeframe),
+    refetchInterval: refreshInterval,
+    refetchIntervalInBackground: true,
+    retry: 1,
+    enabled,
+    placeholderData: (previousData) => previousData,
+  })
+}

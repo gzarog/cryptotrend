@@ -64,6 +64,15 @@ type Props = {
   volatilityPercentile?: number | null
   riskLevels?: RiskLevel | null
   fundingRate?: number | null
+
+  // Advanced indicators
+  hurstExponent?: number | null
+  zScore?: number | null
+  rSquared?: number | null
+  kama?: Array<number | null>
+  autocorrelation?: number | null
+  oiDivergence?: number | null
+  volumeSpikeRatio?: number | null
 }
 
 const RSI_GUIDES = [
@@ -100,6 +109,8 @@ export function DashboardView(props: Props) {
     supertrend = [], supertrendDirection = [], latestSTDir,
     obv = [], obvEma = [], vwap = [],
     volatilityPercentile, riskLevels, fundingRate,
+    hurstExponent, zScore, rSquared,
+    kama = [], autocorrelation, oiDivergence, volumeSpikeRatio,
   } = props
 
   return (
@@ -209,6 +220,41 @@ export function DashboardView(props: Props) {
       {/* Market Summary with Funding Rate */}
       <MarketSummary symbol={symbol} price={price} priceChange={priceChange} fundingRate={fundingRate} />
 
+      {/* Regime Badge */}
+      {hurstExponent != null && (
+        <div className={`glass-panel p-3 mb-6 border-l-4 ${
+          hurstExponent > 0.6 ? 'border-l-blue-500 bg-blue-500/5' :
+          hurstExponent < 0.4 ? 'border-l-amber-500 bg-amber-500/5' :
+          'border-l-gray-500 bg-gray-500/5'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold">
+                {hurstExponent > 0.6 ? 'Trending' : hurstExponent < 0.4 ? 'Mean-Reverting' : 'Random Walk'}
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                hurstExponent > 0.6 ? 'bg-blue-500/20 text-blue-400' :
+                hurstExponent < 0.4 ? 'bg-amber-500/20 text-amber-400' :
+                'bg-gray-500/20 text-gray-400'
+              }`}>
+                H = {hurstExponent.toFixed(3)}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              {rSquared != null && <span>R² = {rSquared.toFixed(2)}</span>}
+              {autocorrelation != null && <span>AC = {autocorrelation.toFixed(3)}</span>}
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            {hurstExponent > 0.6
+              ? 'Trend-following signals (MACD, Supertrend) have boosted weight'
+              : hurstExponent < 0.4
+              ? 'Mean-reversion signals (RSI, BB, Z-Score) have boosted weight'
+              : 'No clear regime — all signal weights reduced'}
+          </p>
+        </div>
+      )}
+
       {/* Indicator Grid */}
       <IndicatorGrid
         rsi={latestRSI}
@@ -220,6 +266,10 @@ export function DashboardView(props: Props) {
         bbPercentB={bbPercentB}
         supertrendDirection={latestSTDir}
         volatilityPercentile={volatilityPercentile}
+        hurstExponent={hurstExponent}
+        zScore={zScore}
+        rSquared={rSquared}
+        oiDivergence={oiDivergence}
       />
 
       {/* Risk Levels */}
@@ -263,6 +313,7 @@ export function DashboardView(props: Props) {
               ...(bbLower.some(v => v !== null) ? [{ name: 'BB Lower', data: bbLower, color: 'hsl(210 40% 50% / 0.5)' }] : []),
               ...(supertrend.some(v => v !== null) ? [{ name: 'Supertrend', data: supertrend, color: latestSTDir === 1 ? 'hsl(160 84% 39%)' : 'hsl(0 84% 60%)' }] : []),
               ...(vwap.some(v => v !== null) ? [{ name: 'VWAP', data: vwap, color: 'hsl(190 90% 60%)' }] : []),
+              ...(kama.some(v => v !== null) ? [{ name: 'KAMA', data: kama, color: 'hsl(330 70% 60%)' }] : []),
             ]}
             isLoading={false}
           />
