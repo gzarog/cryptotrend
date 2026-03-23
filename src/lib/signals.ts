@@ -8,6 +8,8 @@ import type {
   MultiTimeframeConfluence,
   TimeframeSignalSnapshot,
   TrendBias,
+  TrendBiasLayer,
+  TrendBiasCategory,
   QualifiedSignal,
 } from '../types/signals'
 import { detectDivergences } from './divergence'
@@ -502,31 +504,169 @@ function calculateRegimeWeights(hurst: number | null, adx: number | null, volPct
 
 // ─── Trend Bias ─────────────────────────────────────────────────────────────
 
+function clampScore(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v))
+}
+
+function layerDir(v: number): 'bullish' | 'bearish' | 'neutral' {
+  return v > 5 ? 'bullish' : v < -5 ? 'bearish' : 'neutral'
+}
+
+function avgLayers(layers: TrendBiasLayer[]): number {
+  if (layers.length === 0) return 0
+  return layers.reduce((s, l) => s + l.value, 0) / layers.length
+}
+
 export function deriveTrendBias(comp: MomentumComputation): TrendBias {
-  let macdTrend: 'bullish' | 'bearish' | 'neutral' = 'neutral'
-  if (comp.macdHistogram !== null) {
-    macdTrend = comp.macdHistogram > 0 ? 'bullish' : comp.macdHistogram < 0 ? 'bearish' : 'neutral'
+  // ── Category 1: Trend (0.35) ──
+  const trendLayers: TrendBiasLayer[] = []
+
+  if (comp.supertrendDirection !== null) {
+    const v = comp.supertrendDirection === 1 ? 100 : -100
+    trendLayers.push({ label: 'ST', value: v, direction: v > 0 ? 'bullish' : 'bearish' })
   }
 
-  let emaTrend: 'bullish' | 'bearish' | 'neutral' = 'neutral'
   if (comp.ema10 !== null && comp.ema50 !== null) {
-    emaTrend = comp.ema10 > comp.ema50 ? 'bullish' : 'bearish'
+    let emaScore = 0
+    emaScore += comp.ema10 > comp.ema50 ? 33.3 : -33.3
+    if (comp.sma200 !== null) {
+      emaScore += comp.ema50 > comp.sma200 ? 33.3 : -33.3
+      emaScore += comp.ema10 > comp.sma200 ? 33.3 : -33.3
+    }
+    const v = clampScore(emaScore, -100, 100)
+    trendLayers.push({ label: 'EMA', value: v, direction: layerDir(v) })
   }
 
-  let adxStrength: 'strong' | 'moderate' | 'weak' = 'weak'
+  if (comp.linearRegressionSlope !== null && comp.close !== null && comp.close > 0) {
+    const v = clampScore((comp.linearRegressionSlope / comp.close) * 10000, -100, 100)
+    trendLayers.push({ label: 'LR', value: v, direction: layerDir(v) })
+  }
+
+  const trendScore = avgLayers(trendLayers)
+
+  // ── Category 2: Momentum (0.25) ──
+  const momentumLayers: TrendBiasLayer[] = []
+
+  if (comp.macdHistogram !== null && comp.close !== null && comp.close > 0) {
+    const sign = comp.macdHistogram > 0 ? 50 : comp.macdHistogram < 0 ? -50 : 0
+    const boost = clampScore((comp.macdHistogram / comp.close) * 50000, -50, 50)
+    const v = clampScore(sign + boost, -100, 100)
+    momentumLayers.push({ label: 'MACD', value: v, direction: layerDir(v) })
+  }
+
+  if (comp.rsi !== null) {
+    const v = clampScore((comp.rsi - 50) * 2, -100, 100)
+    momentumLayers.push({ label: 'RSI', value: v, direction: layerDir(v) })
+  }
+
+  const momentumScore = avgLayers(momentumLayers)
+
+  // ── Category 3: Volume (0.15) ──
+  const volumeLayers: TrendBiasLayer[] = []
+
+  if (comp.obv !== null && comp.obvEma !== null) {
+    const v = comp.obv > comp.obvEma ? 70 : comp.obv < comp.obvEma ? -70 : 0
+    volumeLayers.push({ label: 'OBV', value: v, direction: v > 0 ? 'bullish' : v < 0 ? 'bearish' : 'neutral' })
+  }
+
+  if (comp.cvd !== null && comp.cvdEma !== null) {
+    const v = comp.cvd > comp.cvdEma ? 70 : comp.cvd < comp.cvdEma ? -70 : 0
+    volumeLayers.push({ label: 'CVD', value: v, direction: v > 0 ? 'bullish' : v < 0 ? 'bearish' : 'neutral' })
+  }
+
+  if (comp.close !== null && comp.vwap !== null) {
+    const v = comp.close > comp.vwap ? 70 : comp.close < comp.vwap ? -70 : 0
+    volumeLayers.push({ label: 'VWAP', value: v, direction: v > 0 ? 'bullish' : v < 0 ? 'bearish' : 'neutral' })
+  }
+
+  const volumeScore = avgLayers(volumeLayers)
+
+  // ── Category 4: Structure (0.15) ──
+  const structureLayers: TrendBiasLayer[] = []
+
+  if (comp.close !== null && comp.ichimokuSenkouA !== null && comp.ichimokuSenkouB !== null) {
+    const cloudTop = Math.max(comp.ichimokuSenkouA, comp.ichimokuSenkouB)
+    const cloudBottom = Math.min(comp.ichimokuSenkouA, comp.ichimokuSenkouB)
+    const v = comp.close > cloudTop ? 80 : comp.close < cloudBottom ? -80 : 0
+    structureLayers.push({ label: 'Cloud', value: v, direction: v > 0 ? 'bullish' : v < 0 ? 'bearish' : 'neutral' })
+  }
+
+  if (comp.ichimokuTenkan !== null && comp.ichimokuKijun !== null) {
+    const v = comp.ichimokuTenkan > comp.ichimokuKijun ? 80 : comp.ichimokuTenkan < comp.ichimokuKijun ? -80 : 0
+    structureLayers.push({ label: 'TK', value: v, direction: v > 0 ? 'bullish' : v < 0 ? 'bearish' : 'neutral' })
+  }
+
+  const structureScore = avgLayers(structureLayers)
+
+  // ── Category 5: Regime (0.10) ──
+  const regimeLayers: TrendBiasLayer[] = []
+  let adxMultiplier = 1.0
+
   if (comp.adx !== null) {
-    adxStrength = comp.adx >= 30 ? 'strong' : comp.adx >= 20 ? 'moderate' : 'weak'
+    adxMultiplier = comp.adx >= 30 ? 1.2 : comp.adx >= 20 ? 1.0 : comp.adx >= 15 ? 0.85 : 0.7
+    const v = comp.adx >= 25 ? 60 : comp.adx >= 20 ? 30 : comp.adx >= 15 ? -20 : -50
+    regimeLayers.push({ label: 'ADX', value: v, direction: v > 0 ? 'bullish' : 'bearish' })
   }
 
-  let score = 0
-  if (macdTrend === 'bullish') score += 1
-  if (macdTrend === 'bearish') score -= 1
-  if (emaTrend === 'bullish') score += 1
-  if (emaTrend === 'bearish') score -= 1
+  if (comp.hurstExponent !== null) {
+    const v = comp.hurstExponent > 0.6 ? 60 : comp.hurstExponent < 0.4 ? -60 : 0
+    regimeLayers.push({ label: 'Hurst', value: v, direction: v > 0 ? 'bullish' : v < 0 ? 'bearish' : 'neutral' })
+  }
 
-  const direction: SignalDirection = score > 0 ? 'long' : score < 0 ? 'short' : 'neutral'
+  const regimeScore = avgLayers(regimeLayers)
 
-  return { direction, score, macdTrend, emaTrend, adxStrength }
+  // ── Combine ──
+  const catWeights = [0.35, 0.25, 0.15, 0.15, 0.10]
+  const catScores = [trendScore, momentumScore, volumeScore, structureScore, regimeScore]
+  const catLayerArrays = [trendLayers, momentumLayers, volumeLayers, structureLayers, regimeLayers]
+  const catLabels = ['Trend', 'Momentum', 'Volume', 'Structure', 'Regime']
+
+  let rawScore = 0
+  let totalWeight = 0
+  const categories: TrendBiasCategory[] = []
+
+  for (let i = 0; i < 5; i++) {
+    if (catLayerArrays[i].length > 0) {
+      rawScore += catScores[i] * catWeights[i]
+      totalWeight += catWeights[i]
+    }
+    categories.push({
+      label: catLabels[i],
+      score: catScores[i],
+      weight: catWeights[i],
+      layers: catLayerArrays[i],
+    })
+  }
+
+  const normalizedScore = totalWeight > 0 ? rawScore / totalWeight : 0
+  const finalScore = clampScore(normalizedScore * adxMultiplier, -100, 100)
+
+  // Confidence: fraction of layers agreeing with final direction
+  const allLayers = categories.flatMap(c => c.layers).filter(l => l.value !== 0)
+  const agreeCount = allLayers.filter(l =>
+    (finalScore > 0 && l.value > 0) || (finalScore < 0 && l.value < 0)
+  ).length
+  const confidence = allLayers.length > 0 ? agreeCount / allLayers.length : 0
+
+  const direction: SignalDirection = finalScore > 10 ? 'long' : finalScore < -10 ? 'short' : 'neutral'
+
+  // Legacy fields
+  const macdTrend: TrendBias['macdTrend'] =
+    comp.macdHistogram !== null ? (comp.macdHistogram > 0 ? 'bullish' : comp.macdHistogram < 0 ? 'bearish' : 'neutral') : 'neutral'
+  const emaTrend: TrendBias['emaTrend'] =
+    comp.ema10 !== null && comp.ema50 !== null ? (comp.ema10 > comp.ema50 ? 'bullish' : 'bearish') : 'neutral'
+  const adxStrength: TrendBias['adxStrength'] =
+    comp.adx !== null ? (comp.adx >= 30 ? 'strong' : comp.adx >= 20 ? 'moderate' : 'weak') : 'weak'
+
+  return {
+    direction,
+    score: Math.round(finalScore * 10) / 10,
+    confidence,
+    categories,
+    macdTrend,
+    emaTrend,
+    adxStrength,
+  }
 }
 
 // ─── Combined Signal ────────────────────────────────────────────────────────

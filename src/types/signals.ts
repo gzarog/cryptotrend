@@ -87,9 +87,24 @@ export type TimeframeSignalSnapshot = {
   cvdEma: number | null
 }
 
+export type TrendBiasLayer = {
+  label: string
+  value: number
+  direction: 'bullish' | 'bearish' | 'neutral'
+}
+
+export type TrendBiasCategory = {
+  label: string
+  score: number
+  weight: number
+  layers: TrendBiasLayer[]
+}
+
 export type TrendBias = {
   direction: SignalDirection
   score: number
+  confidence: number
+  categories: TrendBiasCategory[]
   macdTrend: 'bullish' | 'bearish' | 'neutral'
   emaTrend: 'bullish' | 'bearish' | 'neutral'
   adxStrength: 'strong' | 'moderate' | 'weak'
