@@ -1,4 +1,4 @@
-import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, Candle } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification, Candle } from '../types/app'
 import type { TimeframeSignalSnapshot, QualifiedSignal, MultiTimeframeConfluence } from '../types/signals'
 import type { RiskLevel } from '../lib/risk'
 import type { IchimokuResult, FibonacciResult, CVDResult } from '../lib/indicators'
@@ -45,6 +45,10 @@ type Props = {
   crossNotifications: MovingAverageCrossNotification[]
   signalNotifications?: SignalNotification[]
   divergenceNotifications?: DivergenceNotification[]
+  fundingNotifications?: FundingRateNotification[]
+  regimeNotifications?: RegimeChangeNotification[]
+  volatilityNotifications?: VolatilityBreakoutNotification[]
+  correlationNotifications?: CorrelationBreakdownNotification[]
 
   // Signals
   snapshots: TimeframeSignalSnapshot[]
@@ -112,6 +116,8 @@ export function DashboardView(props: Props) {
     latestMACDLine, latestMACDSignal, latestMACDHist,
     momentumNotifications, crossNotifications,
     signalNotifications = [], divergenceNotifications = [],
+    fundingNotifications = [], regimeNotifications = [],
+    volatilityNotifications = [], correlationNotifications = [],
     snapshots, qualifiedSignals, confluence,
     bbUpper = [], bbLower = [], bbPercentB, bbBandwidth,
     supertrend = [], supertrendDirection = [], latestSTDir,
@@ -183,6 +189,80 @@ export function DashboardView(props: Props) {
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 {n.indicator.replace('divergence-', '').toUpperCase()} • {new Date(n.triggeredAt).toLocaleTimeString()}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Market Notification Cards (Funding, Regime, Volatility, Correlation) */}
+      {fundingNotifications.length > 0 && (
+        <div className="space-y-2">
+          {fundingNotifications.slice(0, 2).map((n) => (
+            <div key={n.id} className="glass-panel p-3 border-l-4 border-l-amber-500">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">
+                  💰 Extreme Funding — {n.direction === 'longs_paying' ? 'Longs paying' : 'Shorts paying'}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {new Date(n.triggeredAt).toLocaleTimeString()}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Rate: {(n.rate * 100).toFixed(4)}%</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {regimeNotifications.length > 0 && (
+        <div className="space-y-2">
+          {regimeNotifications.slice(0, 2).map((n) => (
+            <div key={n.id} className={`glass-panel p-3 border-l-4 ${
+              n.toRegime === 'trending' ? 'border-l-blue-500' :
+              n.toRegime === 'mean-reverting' ? 'border-l-amber-500' : 'border-l-gray-500'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">
+                  🔄 Regime: {n.fromRegime} → {n.toRegime}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {new Date(n.triggeredAt).toLocaleTimeString()}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Hurst: {n.hurstValue.toFixed(3)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {volatilityNotifications.length > 0 && (
+        <div className="space-y-2">
+          {volatilityNotifications.slice(0, 2).map((n) => (
+            <div key={n.id} className="glass-panel p-3 border-l-4 border-l-rose-500">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">⚡ Volatility Spike</span>
+                <span className="text-xs text-muted-foreground">
+                  {new Date(n.triggeredAt).toLocaleTimeString()}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Percentile: {n.volatilityPercentile.toFixed(0)}%</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {correlationNotifications.length > 0 && (
+        <div className="space-y-2">
+          {correlationNotifications.slice(0, 2).map((n) => (
+            <div key={n.id} className="glass-panel p-3 border-l-4 border-l-red-500">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">🔗 {n.asset} Decoupled</span>
+                <span className="text-xs text-muted-foreground">
+                  {new Date(n.triggeredAt).toLocaleTimeString()}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Correlation: {n.correlation.toFixed(3)} (was {n.previousCorrelation.toFixed(3)})
               </p>
             </div>
           ))}

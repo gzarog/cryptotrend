@@ -1,19 +1,8 @@
 /**
  * Client-side notification helpers.
- * Push notification server features are stubbed since this is a frontend-only build.
  */
 
 import type { NotificationPriority } from '../types/app'
-
-export type AppNotification = {
-  id: string
-  title: string
-  body: string
-  timestamp: number
-  type: 'momentum' | 'cross' | 'signal' | 'divergence' | 'funding' | 'system'
-  priority: NotificationPriority
-  read: boolean
-}
 
 let notificationId = 0
 
@@ -41,33 +30,6 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 export function getNotificationPermission(): NotificationPermission {
   if (!('Notification' in window)) return 'denied'
   return Notification.permission
-}
-
-// ─── Push Subscription Stubs ────────────────────────────────────────────────
-
-export type PushSubscriptionState = {
-  isSupported: boolean
-  isSubscribed: boolean
-  permission: NotificationPermission
-}
-
-export function getPushSubscriptionState(): PushSubscriptionState {
-  return {
-    isSupported: 'Notification' in window && 'serviceWorker' in navigator,
-    isSubscribed: false,
-    permission: getNotificationPermission(),
-  }
-}
-
-export async function subscribeToPush(): Promise<boolean> {
-  // Stub: would connect to push server in full implementation
-  const permission = await requestNotificationPermission()
-  return permission === 'granted'
-}
-
-export async function unsubscribeFromPush(): Promise<boolean> {
-  // Stub: would disconnect from push server
-  return true
 }
 
 // ─── Sound Alerts via Web Audio API ─────────────────────────────────────────

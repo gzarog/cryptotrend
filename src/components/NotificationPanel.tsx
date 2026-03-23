@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
 
 export type UnifiedNotification = {
   id: string
-  type: 'momentum' | 'cross' | 'signal' | 'divergence'
+  type: 'momentum' | 'cross' | 'signal' | 'divergence' | 'funding' | 'regime' | 'volatility' | 'correlation'
   title: string
   body: string
   symbol: string
@@ -13,7 +13,7 @@ export type UnifiedNotification = {
   priority?: string
 }
 
-type FilterType = 'all' | 'momentum' | 'cross' | 'signal' | 'divergence'
+type FilterType = 'all' | 'signal' | 'divergence' | 'market' | 'momentum' | 'cross'
 
 type Props = {
   open: boolean
@@ -22,6 +22,10 @@ type Props = {
   crossNotifications: MovingAverageCrossNotification[]
   signalNotifications?: SignalNotification[]
   divergenceNotifications?: DivergenceNotification[]
+  fundingNotifications?: FundingRateNotification[]
+  regimeNotifications?: RegimeChangeNotification[]
+  volatilityNotifications?: VolatilityBreakoutNotification[]
+  correlationNotifications?: CorrelationBreakdownNotification[]
   readIds: Set<string>
   onMarkRead: (id: string) => void
   onMarkAllRead: () => void
@@ -29,11 +33,17 @@ type Props = {
   onSettingsClick: () => void
 }
 
+const MARKET_TYPES = new Set(['funding', 'regime', 'volatility', 'correlation'])
+
 function unify(
   momentum: MomentumNotification[],
   cross: MovingAverageCrossNotification[],
   signals: SignalNotification[] = [],
   divergences: DivergenceNotification[] = [],
+  funding: FundingRateNotification[] = [],
+  regime: RegimeChangeNotification[] = [],
+  volatility: VolatilityBreakoutNotification[] = [],
+  correlation: CorrelationBreakdownNotification[] = [],
 ): UnifiedNotification[] {
   const items: UnifiedNotification[] = []
 
@@ -91,6 +101,64 @@ function unify(
     })
   }
 
+  for (const n of funding) {
+    const dirLabel = n.direction === 'longs_paying' ? 'Longs paying' : 'Shorts paying'
+    items.push({
+      id: n.id,
+      type: 'funding',
+      title: `Extreme Funding — ${dirLabel}`,
+      body: `Rate: ${(n.rate * 100).toFixed(4)}%`,
+      symbol: n.symbol,
+      triggeredAt: n.triggeredAt,
+      accentClass: 'border-l-amber-500',
+      icon: '💰',
+      priority: n.priority,
+    })
+  }
+
+  for (const n of regime) {
+    items.push({
+      id: n.id,
+      type: 'regime',
+      title: `Regime: ${n.fromRegime} → ${n.toRegime}`,
+      body: `Hurst: ${n.hurstValue.toFixed(3)}`,
+      symbol: n.symbol,
+      triggeredAt: n.triggeredAt,
+      accentClass: n.toRegime === 'trending' ? 'border-l-blue-500' :
+                   n.toRegime === 'mean-reverting' ? 'border-l-amber-500' : 'border-l-gray-500',
+      icon: '🔄',
+      priority: n.priority,
+    })
+  }
+
+  for (const n of volatility) {
+    items.push({
+      id: n.id,
+      type: 'volatility',
+      title: 'Volatility Spike',
+      body: `Percentile: ${n.volatilityPercentile.toFixed(0)}%`,
+      symbol: n.symbol,
+      triggeredAt: n.triggeredAt,
+      accentClass: 'border-l-rose-500',
+      icon: '⚡',
+      priority: n.priority,
+    })
+  }
+
+  for (const n of correlation) {
+    items.push({
+      id: n.id,
+      type: 'correlation',
+      title: `${n.asset} Decoupled`,
+      body: `Correlation: ${n.correlation.toFixed(3)} (was ${n.previousCorrelation.toFixed(3)})`,
+      symbol: n.symbol,
+      triggeredAt: n.triggeredAt,
+      accentClass: 'border-l-red-500',
+      icon: '🔗',
+      priority: n.priority,
+    })
+  }
+
   return items.sort((a, b) => b.triggeredAt - a.triggeredAt)
 }
 
@@ -108,10 +176,11 @@ function relativeTime(ts: number): string {
 
 const FILTER_TABS: { key: FilterType; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'momentum', label: 'Momentum' },
-  { key: 'cross', label: 'MA Cross' },
   { key: 'signal', label: 'Signal' },
   { key: 'divergence', label: 'Diverg.' },
+  { key: 'market', label: 'Market' },
+  { key: 'momentum', label: 'Momentum' },
+  { key: 'cross', label: 'MA Cross' },
 ]
 
 export function NotificationPanel({
@@ -121,6 +190,10 @@ export function NotificationPanel({
   crossNotifications,
   signalNotifications = [],
   divergenceNotifications = [],
+  fundingNotifications = [],
+  regimeNotifications = [],
+  volatilityNotifications = [],
+  correlationNotifications = [],
   readIds,
   onMarkRead,
   onMarkAllRead,
@@ -146,16 +219,19 @@ export function NotificationPanel({
 
   if (!open) return null
 
-  const allItems = unify(momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications)
-  const filteredItems = filter === 'all' ? allItems : allItems.filter(i => i.type === filter)
+  const allItems = unify(momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications, fundingNotifications, regimeNotifications, volatilityNotifications, correlationNotifications)
+  const filteredItems = filter === 'all' ? allItems :
+    filter === 'market' ? allItems.filter(i => MARKET_TYPES.has(i.type)) :
+    allItems.filter(i => i.type === filter)
   const unreadCount = allItems.filter(i => !readIds.has(i.id)).length
 
   const countByType: Record<FilterType, number> = {
     all: allItems.length,
-    momentum: allItems.filter(i => i.type === 'momentum').length,
-    cross: allItems.filter(i => i.type === 'cross').length,
     signal: allItems.filter(i => i.type === 'signal').length,
     divergence: allItems.filter(i => i.type === 'divergence').length,
+    market: allItems.filter(i => MARKET_TYPES.has(i.type)).length,
+    momentum: allItems.filter(i => i.type === 'momentum').length,
+    cross: allItems.filter(i => i.type === 'cross').length,
   }
 
   return (

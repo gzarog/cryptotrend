@@ -1,6 +1,6 @@
 import React from 'react'
 import { NotificationPanel } from '../components/NotificationPanel'
-import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -12,6 +12,10 @@ interface MainLayoutProps {
   crossNotifications?: MovingAverageCrossNotification[]
   signalNotifications?: SignalNotification[]
   divergenceNotifications?: DivergenceNotification[]
+  fundingNotifications?: FundingRateNotification[]
+  regimeNotifications?: RegimeChangeNotification[]
+  volatilityNotifications?: VolatilityBreakoutNotification[]
+  correlationNotifications?: CorrelationBreakdownNotification[]
   readNotifIds?: Set<string>
   onMarkRead?: (id: string) => void
   onMarkAllRead?: () => void
@@ -29,6 +33,10 @@ export function MainLayout({
   crossNotifications = [],
   signalNotifications = [],
   divergenceNotifications = [],
+  fundingNotifications = [],
+  regimeNotifications = [],
+  volatilityNotifications = [],
+  correlationNotifications = [],
   readNotifIds = new Set(),
   onMarkRead,
   onMarkAllRead,
@@ -80,6 +88,10 @@ export function MainLayout({
             crossNotifications={crossNotifications}
             signalNotifications={signalNotifications}
             divergenceNotifications={divergenceNotifications}
+            fundingNotifications={fundingNotifications}
+            regimeNotifications={regimeNotifications}
+            volatilityNotifications={volatilityNotifications}
+            correlationNotifications={correlationNotifications}
             readIds={readNotifIds}
             onMarkRead={(id) => onMarkRead?.(id)}
             onMarkAllRead={() => onMarkAllRead?.()}

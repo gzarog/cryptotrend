@@ -23,7 +23,7 @@ import { createNotificationId, showBrowserNotification, getCooldown, playNotific
 import { calculateRiskLevels } from '../lib/risk'
 import { createInitialBayesianState, updateBayesianAccuracy } from '../lib/bayesian'
 import type { BayesianState } from '../lib/bayesian'
-import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, SignalNotification, DivergenceNotification } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
 import type { TimeframeSignalSnapshot } from '../types/signals'
 
 // ─── Timeframe-Adaptive Settings ────────────────────────────────────────────
@@ -125,6 +125,16 @@ function detectMomentum(
   return null
 }
 
+// ─── Notification Noise Filter ──────────────────────────────────────────────
+
+const MIN_NOTIF_TF = 60
+
+function tfMinutes(tf: string): number {
+  if (tf === 'D') return 1440
+  if (tf === 'W') return 10080
+  return parseInt(tf) || 0
+}
+
 // ─── localStorage Helpers ───────────────────────────────────────────────────
 
 function loadFromStorage<T>(key: string, fallback: T): T {
@@ -177,6 +187,18 @@ const Index = () => {
   const [divergenceNotifications, setDivergenceNotifications] = useState<DivergenceNotification[]>(
     () => loadFromStorage('divergence-notifications', [])
   )
+  const [fundingNotifications, setFundingNotifications] = useState<FundingRateNotification[]>(
+    () => loadFromStorage('funding-notifications', [])
+  )
+  const [regimeNotifications, setRegimeNotifications] = useState<RegimeChangeNotification[]>(
+    () => loadFromStorage('regime-notifications', [])
+  )
+  const [volatilityNotifications, setVolatilityNotifications] = useState<VolatilityBreakoutNotification[]>(
+    () => loadFromStorage('volatility-notifications', [])
+  )
+  const [correlationNotifications, setCorrelationNotifications] = useState<CorrelationBreakdownNotification[]>(
+    () => loadFromStorage('correlation-notifications', [])
+  )
   const prevCrossRef = useRef<Record<string, 'golden' | 'death' | null>>({})
 
   // Bayesian state for accuracy tracking
@@ -195,6 +217,18 @@ const Index = () => {
   useEffect(() => {
     localStorage.setItem('divergence-notifications', JSON.stringify(divergenceNotifications.slice(0, 50)))
   }, [divergenceNotifications])
+  useEffect(() => {
+    localStorage.setItem('funding-notifications', JSON.stringify(fundingNotifications.slice(0, 50)))
+  }, [fundingNotifications])
+  useEffect(() => {
+    localStorage.setItem('regime-notifications', JSON.stringify(regimeNotifications.slice(0, 50)))
+  }, [regimeNotifications])
+  useEffect(() => {
+    localStorage.setItem('volatility-notifications', JSON.stringify(volatilityNotifications.slice(0, 50)))
+  }, [volatilityNotifications])
+  useEffect(() => {
+    localStorage.setItem('correlation-notifications', JSON.stringify(correlationNotifications.slice(0, 50)))
+  }, [correlationNotifications])
   useEffect(() => {
     localStorage.setItem('read-notif-ids', JSON.stringify([...readNotifIds]))
   }, [readNotifIds])
@@ -492,6 +526,7 @@ const Index = () => {
   useEffect(() => {
     for (const comp of computations) {
       if (!comp.candles.length || !comp.close) continue
+      if (tfMinutes(comp.timeframe) < MIN_NOTIF_TF) continue
       const c = comp.candles.map(x => x.close)
       const tfEma10 = calculateEMA(c, 10)
       const tfEma50 = calculateEMA(c, 50)
@@ -525,6 +560,7 @@ const Index = () => {
 
   useEffect(() => {
     for (const comp of computations) {
+      if (tfMinutes(comp.timeframe) < MIN_NOTIF_TF) continue
       const momentum = detectMomentum(comp.rsi, comp.stochD)
       if (momentum) {
         const cooldown = getCooldown(comp.timeframe)
@@ -619,8 +655,7 @@ const Index = () => {
         if (sig.confidence < 0.6) continue
 
         const cooldown = getCooldown(comp.timeframe) * 2
-        const priority = parseInt(comp.timeframe) >= 240 ? 'high' as const :
-                         parseInt(comp.timeframe) >= 60 ? 'medium' as const : 'low' as const
+        const priority = getTimeframePriority(comp.timeframe)
 
         setDivergenceNotifications(prev => {
           const recent = prev.filter(p =>
@@ -655,7 +690,7 @@ const Index = () => {
     }
   }, [computations, symbol])
 
-  // ─── Funding Rate Notifications ───────────────────────────────────────────
+  // ─── Funding Rate Notifications (stored) ─────────────────────────────────
 
   const prevFundingRef = useRef<number | null>(null)
   useEffect(() => {
@@ -665,19 +700,177 @@ const Index = () => {
     prevFundingRef.current = rate
 
     if (Math.abs(rate) >= 0.0005 && (prevRate === null || Math.abs(prevRate) < 0.0005)) {
-      const direction = rate > 0 ? 'Longs paying' : 'Shorts paying'
-      showBrowserNotification(
-        `⚠️ Extreme Funding — ${symbol}`,
-        `${direction}: ${(rate * 100).toFixed(4)}%`
-      )
-      playNotificationSound('medium')
+      const direction = rate > 0 ? 'longs_paying' as const : 'shorts_paying' as const
+      const dirLabel = rate > 0 ? 'Longs paying' : 'Shorts paying'
+      const priority = Math.abs(rate) >= 0.001 ? 'high' as const : 'medium' as const
+
+      const notif: FundingRateNotification = {
+        id: createNotificationId(),
+        symbol,
+        rate,
+        direction,
+        priority,
+        triggeredAt: Date.now(),
+      }
+
+      setFundingNotifications(prev => {
+        const recent = prev.filter(p => Date.now() - p.triggeredAt < 30 * 60 * 1000)
+        if (recent.length > 0) return prev
+        showBrowserNotification(
+          `Extreme Funding — ${symbol}`,
+          `${dirLabel}: ${(rate * 100).toFixed(4)}%`
+        )
+        playNotificationSound(priority)
+        return [notif, ...prev].slice(0, 50)
+      })
     }
   }, [tickerData, symbol])
+
+  // ─── Regime Change Notifications ───────────────────────────────────────────
+
+  const prevHurstRegimeRef = useRef<'trending' | 'mean-reverting' | 'random-walk' | null>(null)
+  useEffect(() => {
+    if (hurstExponent === null) return
+
+    const currentRegime = hurstExponent > 0.6 ? 'trending' as const :
+                          hurstExponent < 0.4 ? 'mean-reverting' as const : 'random-walk' as const
+    const prevRegime = prevHurstRegimeRef.current
+    prevHurstRegimeRef.current = currentRegime
+
+    if (prevRegime !== null && prevRegime !== currentRegime) {
+      const priority = currentRegime === 'random-walk' ? 'medium' as const : 'high' as const
+      const notif: RegimeChangeNotification = {
+        id: createNotificationId(),
+        symbol,
+        fromRegime: prevRegime,
+        toRegime: currentRegime,
+        hurstValue: hurstExponent,
+        priority,
+        triggeredAt: Date.now(),
+      }
+
+      setRegimeNotifications(prev => {
+        const recent = prev.filter(p => Date.now() - p.triggeredAt < 30 * 60 * 1000)
+        if (recent.length > 0) return prev
+        showBrowserNotification(
+          `Regime Change — ${symbol}`,
+          `${prevRegime} → ${currentRegime} (H=${hurstExponent.toFixed(3)})`
+        )
+        playNotificationSound(priority)
+        return [notif, ...prev].slice(0, 50)
+      })
+    }
+  }, [hurstExponent, symbol])
+
+  // ─── Volatility Spike Notifications ────────────────────────────────────────
+
+  const prevVolPercentileRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (latestVolPercentile === null) return
+
+    const prevVol = prevVolPercentileRef.current
+    prevVolPercentileRef.current = latestVolPercentile
+
+    if (prevVol !== null && prevVol < 80 && latestVolPercentile >= 80) {
+      const priority = latestVolPercentile >= 95 ? 'high' as const : 'medium' as const
+      const notif: VolatilityBreakoutNotification = {
+        id: createNotificationId(),
+        symbol,
+        volatilityPercentile: latestVolPercentile,
+        direction: 'spike',
+        priority,
+        triggeredAt: Date.now(),
+      }
+
+      setVolatilityNotifications(prev => {
+        const recent = prev.filter(p => Date.now() - p.triggeredAt < 60 * 60 * 1000)
+        if (recent.length > 0) return prev
+        showBrowserNotification(
+          `Volatility Spike — ${symbol}`,
+          `Vol percentile: ${latestVolPercentile.toFixed(0)}%`
+        )
+        playNotificationSound(priority)
+        return [notif, ...prev].slice(0, 50)
+      })
+    }
+  }, [latestVolPercentile, symbol])
+
+  // ─── Correlation Breakdown Notifications ───────────────────────────────────
+
+  const prevBtcCorrRef = useRef<number | null>(null)
+  const prevEthCorrRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (btcCorrelation !== null) {
+      const prevBtc = prevBtcCorrRef.current
+      prevBtcCorrRef.current = btcCorrelation
+
+      if (prevBtc !== null && prevBtc >= 0.3 && btcCorrelation < 0.3) {
+        const priority = btcCorrelation < 0.1 ? 'high' as const : 'medium' as const
+        const notif: CorrelationBreakdownNotification = {
+          id: createNotificationId(),
+          symbol,
+          asset: 'BTC',
+          correlation: btcCorrelation,
+          previousCorrelation: prevBtc,
+          priority,
+          triggeredAt: Date.now(),
+        }
+
+        setCorrelationNotifications(prev => {
+          const recent = prev.filter(p =>
+            Date.now() - p.triggeredAt < 60 * 60 * 1000 && p.asset === 'BTC'
+          )
+          if (recent.length > 0) return prev
+          showBrowserNotification(
+            `BTC Correlation Breakdown — ${symbol}`,
+            `Correlation: ${btcCorrelation.toFixed(3)} (was ${prevBtc.toFixed(3)})`
+          )
+          playNotificationSound(priority)
+          return [notif, ...prev].slice(0, 50)
+        })
+      }
+    }
+
+    if (ethCorrelation !== null) {
+      const prevEth = prevEthCorrRef.current
+      prevEthCorrRef.current = ethCorrelation
+
+      if (prevEth !== null && prevEth >= 0.3 && ethCorrelation < 0.3) {
+        const priority = ethCorrelation < 0.1 ? 'high' as const : 'medium' as const
+        const notif: CorrelationBreakdownNotification = {
+          id: createNotificationId(),
+          symbol,
+          asset: 'ETH',
+          correlation: ethCorrelation,
+          previousCorrelation: prevEth,
+          priority,
+          triggeredAt: Date.now(),
+        }
+
+        setCorrelationNotifications(prev => {
+          const recent = prev.filter(p =>
+            Date.now() - p.triggeredAt < 60 * 60 * 1000 && p.asset === 'ETH'
+          )
+          if (recent.length > 0) return prev
+          showBrowserNotification(
+            `ETH Correlation Breakdown — ${symbol}`,
+            `Correlation: ${ethCorrelation.toFixed(3)} (was ${prevEth.toFixed(3)})`
+          )
+          playNotificationSound(priority)
+          return [notif, ...prev].slice(0, 50)
+        })
+      }
+    }
+  }, [btcCorrelation, ethCorrelation, symbol])
 
   // Reset detection refs on symbol change
   useEffect(() => {
     prevCrossRef.current = {}
     prevFundingRef.current = null
+    prevHurstRegimeRef.current = null
+    prevVolPercentileRef.current = null
+    prevBtcCorrRef.current = null
+    prevEthCorrRef.current = null
     bayesianStateRef.current = createInitialBayesianState()
   }, [symbol])
 
@@ -687,8 +880,12 @@ const Index = () => {
     for (const n of crossNotifications) ids.push(n.id)
     for (const n of signalNotifications) ids.push(n.id)
     for (const n of divergenceNotifications) ids.push(n.id)
+    for (const n of fundingNotifications) ids.push(n.id)
+    for (const n of regimeNotifications) ids.push(n.id)
+    for (const n of volatilityNotifications) ids.push(n.id)
+    for (const n of correlationNotifications) ids.push(n.id)
     return ids
-  }, [momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications])
+  }, [momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications, fundingNotifications, regimeNotifications, volatilityNotifications, correlationNotifications])
 
   const unreadCount = useMemo(
     () => allNotifIds.filter(id => !readNotifIds.has(id)).length,
@@ -708,6 +905,10 @@ const Index = () => {
     setCrossNotifications([])
     setSignalNotifications([])
     setDivergenceNotifications([])
+    setFundingNotifications([])
+    setRegimeNotifications([])
+    setVolatilityNotifications([])
+    setCorrelationNotifications([])
     setReadNotifIds(new Set())
   }, [])
 
@@ -721,6 +922,10 @@ const Index = () => {
       crossNotifications={crossNotifications}
       signalNotifications={signalNotifications}
       divergenceNotifications={divergenceNotifications}
+      fundingNotifications={fundingNotifications}
+      regimeNotifications={regimeNotifications}
+      volatilityNotifications={volatilityNotifications}
+      correlationNotifications={correlationNotifications}
       readNotifIds={readNotifIds}
       onMarkRead={handleMarkRead}
       onMarkAllRead={handleMarkAllRead}
@@ -770,6 +975,10 @@ const Index = () => {
         crossNotifications={crossNotifications}
         signalNotifications={signalNotifications}
         divergenceNotifications={divergenceNotifications}
+        fundingNotifications={fundingNotifications}
+        regimeNotifications={regimeNotifications}
+        volatilityNotifications={volatilityNotifications}
+        correlationNotifications={correlationNotifications}
         snapshots={snapshots}
         qualifiedSignals={qualifiedSignals}
         confluence={confluence}

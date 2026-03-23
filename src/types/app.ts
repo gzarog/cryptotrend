@@ -149,6 +149,44 @@ export type DivergenceNotification = {
   triggeredAt: number
 }
 
+export type FundingRateNotification = {
+  id: string
+  symbol: string
+  rate: number
+  direction: 'longs_paying' | 'shorts_paying'
+  priority: NotificationPriority
+  triggeredAt: number
+}
+
+export type RegimeChangeNotification = {
+  id: string
+  symbol: string
+  fromRegime: 'trending' | 'mean-reverting' | 'random-walk'
+  toRegime: 'trending' | 'mean-reverting' | 'random-walk'
+  hurstValue: number
+  priority: NotificationPriority
+  triggeredAt: number
+}
+
+export type VolatilityBreakoutNotification = {
+  id: string
+  symbol: string
+  volatilityPercentile: number
+  direction: 'spike' | 'collapse'
+  priority: NotificationPriority
+  triggeredAt: number
+}
+
+export type CorrelationBreakdownNotification = {
+  id: string
+  symbol: string
+  asset: 'BTC' | 'ETH'
+  correlation: number
+  previousCorrelation: number
+  priority: NotificationPriority
+  triggeredAt: number
+}
+
 export type TimeframeOption = {
   value: string
   label: string
