@@ -17,22 +17,13 @@ export default defineConfig(({ mode }) => ({
     react(),
     mode === "development" && componentTagger(),
     VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "placeholder.svg"],
-      workbox: {
-        navigateFallbackDenylist: [/^\/~oauth/],
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        navigateFallback: "/offline.html",
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/api\./,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "api-cache",
-              networkTimeoutSeconds: 5,
-            },
-          },
-        ],
       },
       manifest: {
         name: "CryptoTrendNotify – Crypto Momentum Dashboard",

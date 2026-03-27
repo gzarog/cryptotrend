@@ -1,6 +1,7 @@
 name = "cryptotrend"
 compatibility_date = "2025-09-27"
 compatibility_flags = ["nodejs_compat"]
+main = "worker/index.ts"
 
 [assets]
 directory = "./dist"
@@ -8,3 +9,28 @@ not_found_handling = "single-page-application"
 
 [observability]
 enabled = true
+
+# Push notification KV namespaces
+# Run: wrangler kv:namespace create PUSH_SUBSCRIPTIONS
+#      wrangler kv:namespace create ALERT_COOLDOWNS
+# Then replace the placeholder IDs below with the real ones.
+[[kv_namespaces]]
+binding = "PUSH_SUBSCRIPTIONS"
+id = "REPLACE_WITH_PUSH_SUBSCRIPTIONS_KV_ID"
+
+[[kv_namespaces]]
+binding = "ALERT_COOLDOWNS"
+id = "REPLACE_WITH_ALERT_COOLDOWNS_KV_ID"
+
+# VAPID public key (safe to commit)
+[vars]
+VAPID_SUBJECT = "mailto:admin@cryptotrend.app"
+VAPID_PUBLIC_KEY = "BMFQ4IxTfLtsjs5eZZkHg74cfXJgpmqVLiDhpQtiaFD73JEZEhDCo-jhNavMBpN3e3OBLkk6gXOoGbETN-hZu0U"
+
+# VAPID private key — set as a secret (never commit):
+#   wrangler secret put VAPID_PRIVATE_KEY
+# Value: BkERp_XYe9JTJfqg9j2ftq0U08okhqt46sDLNaY9EA0
+
+# Cron: run signal detection + push delivery every 5 minutes
+[triggers]
+crons = ["*/5 * * * *"]

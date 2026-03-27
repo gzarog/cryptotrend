@@ -1,5 +1,14 @@
-import { useState } from 'react'
-import { requestNotificationPermission, getNotificationPermission, getSoundEnabled, setSoundEnabled } from '../lib/notifications'
+import { useEffect, useState } from 'react'
+import {
+  requestNotificationPermission,
+  getNotificationPermission,
+  getSoundEnabled,
+  setSoundEnabled,
+  subscribeToPush,
+  sendSubscriptionToServer,
+  unsubscribeFromPush,
+  getPushSubscription,
+} from '../lib/notifications'
 
 type Props = {
   open: boolean
@@ -10,6 +19,16 @@ export function NotificationDialog({ open, onClose }: Props) {
   const [permission, setPermission] = useState(getNotificationPermission)
   const [soundOn, setSoundOn] = useState(getSoundEnabled)
   const [isRequesting, setIsRequesting] = useState(false)
+  const [pushSupported] = useState(() => 'serviceWorker' in navigator && 'PushManager' in window)
+  const [pushSubscribed, setPushSubscribed] = useState(false)
+  const [pushLoading, setPushLoading] = useState(false)
+  const [pushError, setPushError] = useState<string | null>(null)
+
+  // Check if already subscribed on mount
+  useEffect(() => {
+    if (!open || !pushSupported) return
+    getPushSubscription().then((sub) => setPushSubscribed(!!sub))
+  }, [open, pushSupported])
 
   if (!open) return null
 
@@ -31,6 +50,39 @@ export function NotificationDialog({ open, onClose }: Props) {
     setSoundEnabled(next)
   }
 
+  const handlePushToggle = async () => {
+    setPushError(null)
+    setPushLoading(true)
+    try {
+      if (pushSubscribed) {
+        await unsubscribeFromPush()
+        setPushSubscribed(false)
+      } else {
+        // Ensure browser notifications are permitted first
+        let perm = permission
+        if (perm !== 'granted') {
+          perm = await requestNotificationPermission()
+          setPermission(perm)
+        }
+        if (perm !== 'granted') {
+          setPushError('Browser notification permission is required for push notifications.')
+          return
+        }
+        const sub = await subscribeToPush()
+        if (!sub) {
+          setPushError('Push notifications are not supported on this device/browser.')
+          return
+        }
+        await sendSubscriptionToServer(sub)
+        setPushSubscribed(true)
+      }
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : 'Failed to update push subscription.')
+    } finally {
+      setPushLoading(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
@@ -38,6 +90,7 @@ export function NotificationDialog({ open, onClose }: Props) {
       <div className="relative glass-panel p-6 max-w-md w-full mx-4 space-y-4">
         <h2 className="text-lg font-semibold">Notification Settings</h2>
 
+        {/* Browser Notifications */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">Browser Notifications:</span>
@@ -70,6 +123,37 @@ export function NotificationDialog({ open, onClose }: Props) {
           </p>
         )}
 
+        {/* Push Notifications (installed PWA / background) */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <span className="text-sm text-muted-foreground">Push Notifications</span>
+              <p className="text-xs text-muted-foreground/70">
+                {pushSupported
+                  ? 'Receive alerts even when the app is closed'
+                  : 'Not supported on this browser'}
+              </p>
+            </div>
+            {pushSupported && (
+              <button
+                onClick={handlePushToggle}
+                disabled={pushLoading || !isSupported}
+                className={`px-3 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                  pushSubscribed
+                    ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                    : 'bg-white/5 text-muted-foreground border border-white/10'
+                }`}
+              >
+                {pushLoading ? '...' : pushSubscribed ? 'ON' : 'OFF'}
+              </button>
+            )}
+          </div>
+          {pushError && (
+            <p className="text-xs text-red-400">{pushError}</p>
+          )}
+        </div>
+
+        {/* Sound Alerts */}
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">Sound Alerts</span>
           <button
