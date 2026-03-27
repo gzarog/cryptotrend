@@ -16,11 +16,11 @@ enabled = true
 # Then replace the placeholder IDs below with the real ones.
 [[kv_namespaces]]
 binding = "PUSH_SUBSCRIPTIONS"
-id = "REPLACE_WITH_PUSH_SUBSCRIPTIONS_KV_ID"
+id = "668dac64b96b40f7895d8c49bc30c805"
 
 [[kv_namespaces]]
 binding = "ALERT_COOLDOWNS"
-id = "REPLACE_WITH_ALERT_COOLDOWNS_KV_ID"
+id = "cfdb173091294911b9c9250f90c4c062"
 
 # VAPID public key (safe to commit)
 [vars]
