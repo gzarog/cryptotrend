@@ -28,8 +28,8 @@ VAPID_SUBJECT = "mailto:admin@cryptotrend.app"
 VAPID_PUBLIC_KEY = "BMFQ4IxTfLtsjs5eZZkHg74cfXJgpmqVLiDhpQtiaFD73JEZEhDCo-jhNavMBpN3e3OBLkk6gXOoGbETN-hZu0U"
 
 # VAPID private key — set as a secret (never commit):
-#   wrangler secret put VAPID_PRIVATE_KEY
-# Value: BkERp_XYe9JTJfqg9j2ftq0U08okhqt46sDLNaY9EA0
+wrangler secret put VAPID_PRIVATE_KEY
+Value: BkERp_XYe9JTJfqg9j2ftq0U08okhqt46sDLNaY9EA0
 
 # Cron: run signal detection + push delivery every 5 minutes
 [triggers]
