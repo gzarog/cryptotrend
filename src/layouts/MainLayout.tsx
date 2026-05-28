@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { NotificationPanel } from '../components/NotificationPanel'
 import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
 
@@ -43,6 +43,26 @@ export function MainLayout({
   onClearAllNotifs,
   unreadCount = 0,
 }: MainLayoutProps) {
+  // Cloudflare Access: surface the signed-in email + a logout link when the app
+  // is served behind Access. Outside Access (e.g. local dev) /api/me returns
+  // { email: null } and this renders nothing.
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { email?: string | null } | null) => {
+        if (!cancelled && data?.email) setUserEmail(data.email)
+      })
+      .catch(() => {
+        /* not behind Access / offline — ignore */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <div className="min-h-screen bg-background text-foreground relative overflow-hidden font-sans selection:bg-primary/30">
       {/* Background Gradients */}
@@ -64,8 +84,27 @@ export function MainLayout({
           </h1>
         </div>
 
+        {/* Signed-in user (Cloudflare Access) */}
+        {userEmail && (
+          <div className="ml-auto mr-2 flex items-center gap-2">
+            <span
+              className="hidden sm:inline text-xs text-muted-foreground max-w-[180px] truncate"
+              title={userEmail}
+            >
+              {userEmail}
+            </span>
+            <a
+              href="/cdn-cgi/access/logout"
+              className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
+              title="Sign out"
+            >
+              Logout
+            </a>
+          </div>
+        )}
+
         {/* Bell with panel */}
-        <div className="ml-auto relative">
+        <div className={`${userEmail ? '' : 'ml-auto '}relative`}>
           <button
             onClick={onToggleNotifPanel}
             className="p-2 rounded-lg hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground relative"

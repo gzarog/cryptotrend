@@ -64,6 +64,12 @@ This project is built with:
 
 Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
 
+## Authentication
+
+Registration / sign-in is handled by **Cloudflare Access One-Time PIN (OTP)** — no
+database, no email service, no auth code. Approved emails receive a one-time PIN to log
+in. See [docs/AUTH.md](docs/AUTH.md) for the one-time Cloudflare Zero Trust setup.
+
 ## Can I connect a custom domain to my Lovable project?
 
 Yes, you can!
