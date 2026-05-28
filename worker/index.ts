@@ -68,6 +68,15 @@ export default {
       return json({ ok: true, ts: Date.now() })
     }
 
+    // GET /api/me — returns the Cloudflare Access authenticated user, if any.
+    // Cloudflare Access injects the Cf-Access-Authenticated-User-Email header on
+    // requests that pass an Access policy. Returns null when not behind Access
+    // (e.g. local dev), so the frontend can no-op gracefully.
+    if (request.method === 'GET' && url.pathname === '/api/me') {
+      const email = request.headers.get('Cf-Access-Authenticated-User-Email')
+      return json({ email: email ?? null })
+    }
+
     // All other requests → fall through to static assets (handled by [assets] config)
     return new Response('Not found', { status: 404 })
   },
