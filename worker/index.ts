@@ -1,13 +1,14 @@
 /**
  * Cloudflare Worker entry point.
  * - Handles push subscription API routes
- * - Handles cron triggers for signal detection + push delivery
- * - Falls through to static assets for all other requests
+ * - Handles email alert toggle for the CF-Access authenticated user
+ * - Handles cron triggers for signal detection + push/email delivery
  */
 
 import type { Env } from './push'
 import { addSubscription, removeSubscription } from './kv'
 import { handleScheduled } from './scheduler'
+import { isSubscribed, toggleSubscription, sendTestEmail } from './email'
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -16,26 +17,30 @@ function json(data: unknown, status = 200): Response {
   })
 }
 
+function getAuthEmail(request: Request, env: Env): string | null {
+  return request.headers.get('Cf-Access-Authenticated-User-Email')
+    ?? env.DEV_USER_EMAIL
+    ?? null
+}
+
 function corsHeaders(): HeadersInit {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   }
 }
 
 export default {
-  // ─── HTTP handler ────────────────────────────────────────────────────────
-
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
-    // Handle CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders() })
     }
 
-    // POST /api/push/subscribe
+    // ── Push notification routes ─────────────────────────────────────────
+
     if (request.method === 'POST' && url.pathname === '/api/push/subscribe') {
       try {
         const body = await request.json() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } }
@@ -50,7 +55,6 @@ export default {
       }
     }
 
-    // POST /api/push/unsubscribe
     if (request.method === 'POST' && url.pathname === '/api/push/unsubscribe') {
       try {
         const body = await request.json() as { endpoint?: string }
@@ -63,25 +67,60 @@ export default {
       }
     }
 
-    // GET /api/push/status (health check)
     if (request.method === 'GET' && url.pathname === '/api/push/status') {
       return json({ ok: true, ts: Date.now() })
     }
 
-    // GET /api/me — returns the Cloudflare Access authenticated user, if any.
-    // Cloudflare Access injects the Cf-Access-Authenticated-User-Email header on
-    // requests that pass an Access policy. Returns null when not behind Access
-    // (e.g. local dev), so the frontend can no-op gracefully.
+    // ── Auth ─────────────────────────────────────────────────────────────
+
     if (request.method === 'GET' && url.pathname === '/api/me') {
-      const email = request.headers.get('Cf-Access-Authenticated-User-Email')
+      const email = getAuthEmail(request, env)
       return json({ email: email ?? null })
     }
 
-    // All other requests → fall through to static assets (handled by [assets] config)
+    // ── Email alert toggle (uses CF Access identity) ──────────────────────
+
+    // GET /api/email/status — is the current user subscribed?
+    if (request.method === 'GET' && url.pathname === '/api/email/status') {
+      const email = getAuthEmail(request, env)
+      if (!email) return json({ subscribed: false, email: null })
+      try {
+        const subscribed = await isSubscribed(env, email)
+        return json({ subscribed, email })
+      } catch (err) {
+        console.error('email status error:', err)
+        return json({ error: 'Failed to check status' }, 500)
+      }
+    }
+
+    // POST /api/email/test — send a test email to the current CF Access user
+    if (request.method === 'POST' && url.pathname === '/api/email/test') {
+      const email = getAuthEmail(request, env)
+      if (!email) return json({ error: 'Not authenticated via Cloudflare Access' }, 401)
+      try {
+        const ok = await sendTestEmail(env, email)
+        return json({ ok })
+      } catch (err) {
+        console.error('email test error:', err)
+        return json({ error: 'Failed to send test email' }, 500)
+      }
+    }
+
+    // POST /api/email/toggle — flip subscription state for current user
+    if (request.method === 'POST' && url.pathname === '/api/email/toggle') {
+      const email = getAuthEmail(request, env)
+      if (!email) return json({ error: 'Not authenticated via Cloudflare Access' }, 401)
+      try {
+        const nowEnabled = await toggleSubscription(env, email)
+        return json({ subscribed: nowEnabled, email })
+      } catch (err) {
+        console.error('email toggle error:', err)
+        return json({ error: 'Failed to toggle subscription' }, 500)
+      }
+    }
+
     return new Response('Not found', { status: 404 })
   },
-
-  // ─── Cron trigger ────────────────────────────────────────────────────────
 
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(handleScheduled(env))

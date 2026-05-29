@@ -13,6 +13,7 @@ enabled = true
 # Push notification KV namespaces
 # Run: wrangler kv:namespace create PUSH_SUBSCRIPTIONS
 #      wrangler kv:namespace create ALERT_COOLDOWNS
+#      wrangler kv:namespace create EMAIL_SUBSCRIPTIONS
 # Then replace the placeholder IDs below with the real ones.
 [[kv_namespaces]]
 binding = "PUSH_SUBSCRIPTIONS"
@@ -22,10 +23,24 @@ id = "668dac64b96b40f7895d8c49bc30c805"
 binding = "ALERT_COOLDOWNS"
 id = "cfdb173091294911b9c9250f90c4c062"
 
+[[kv_namespaces]]
+binding = "EMAIL_SUBSCRIPTIONS"
+id = "96d8042aeee94e7297968e4c5b43b420"
+preview_id = "bb6e31167429490faa542b7c9ce980a5"
+
+# Cloudflare Email Workers binding — no third-party API needed.
+# Requires Email Routing to be enabled on your domain in the Cloudflare dashboard.
+# The FROM_EMAIL address must be on a domain with Email Routing active.
+# Docs: https://developers.cloudflare.com/email-routing/email-workers/send-email-workers/
+[[send_email]]
+name = "EMAIL"
+
 # VAPID public key (safe to commit)
 [vars]
 VAPID_SUBJECT = "mailto:admin@cryptotrend.app"
 VAPID_PUBLIC_KEY = "BMFQ4IxTfLtsjs5eZZkHg74cfXJgpmqVLiDhpQtiaFD73JEZEhDCo-jhNavMBpN3e3OBLkk6gXOoGbETN-hZu0U"
+# Replace with an address on your Email Routing-enabled domain:
+FROM_EMAIL = "alerts@yourdomain.com"
 
 # VAPID private key — set as a secret (never commit):
 # wrangler secret put VAPID_PRIVATE_KEY

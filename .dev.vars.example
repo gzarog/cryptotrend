@@ -1,0 +1,11 @@
+# Wrangler reads .dev.vars automatically in local dev (wrangler dev).
+# Copy this file to .dev.vars and fill in your values.
+# .dev.vars is gitignored — never commit it.
+
+# Required: Web Push VAPID private key
+VAPID_PRIVATE_KEY=BkERp_XYe9JTJfqg9j2ftq0U08okhqt46sDLNaY9EA0
+
+# Local dev only: simulates the Cloudflare Access identity header.
+# Set this to your email so /api/me, email toggle, and test-email work locally
+# without a cloudflared tunnel.
+DEV_USER_EMAIL=you@example.com
