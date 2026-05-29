@@ -8,7 +8,7 @@
 import type { Env } from './push'
 import { addSubscription, removeSubscription } from './kv'
 import { handleScheduled } from './scheduler'
-import { isSubscribed, toggleSubscription } from './email'
+import { isSubscribed, toggleSubscription, sendTestEmail } from './email'
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -84,6 +84,19 @@ export default {
       } catch (err) {
         console.error('email status error:', err)
         return json({ error: 'Failed to check status' }, 500)
+      }
+    }
+
+    // POST /api/email/test — send a test email to the current CF Access user
+    if (request.method === 'POST' && url.pathname === '/api/email/test') {
+      const email = request.headers.get('Cf-Access-Authenticated-User-Email')
+      if (!email) return json({ error: 'Not authenticated via Cloudflare Access' }, 401)
+      try {
+        const ok = await sendTestEmail(env, email)
+        return json({ ok })
+      } catch (err) {
+        console.error('email test error:', err)
+        return json({ error: 'Failed to send test email' }, 500)
       }
     }
 

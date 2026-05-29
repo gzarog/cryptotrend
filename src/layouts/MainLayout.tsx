@@ -46,6 +46,7 @@ export function MainLayout({
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [emailSubscribed, setEmailSubscribed] = useState<boolean | null>(null) // null = unknown/loading
   const [emailToggling, setEmailToggling] = useState(false)
+  const [testState, setTestState] = useState<'idle' | 'sending' | 'ok' | 'fail'>('idle')
 
   // Load CF Access user + email alert status
   useEffect(() => {
@@ -70,6 +71,19 @@ export function MainLayout({
       .catch(() => { /* not behind Access */ })
     return () => { cancelled = true }
   }, [userEmail])
+
+  const sendTest = useCallback(async () => {
+    setTestState('sending')
+    try {
+      const res = await fetch('/api/email/test', { method: 'POST' })
+      const data = await res.json() as { ok?: boolean }
+      setTestState(data.ok ? 'ok' : 'fail')
+    } catch {
+      setTestState('fail')
+    } finally {
+      setTimeout(() => setTestState('idle'), 3000)
+    }
+  }, [])
 
   const toggleEmail = useCallback(async () => {
     if (emailToggling) return
@@ -119,21 +133,40 @@ export function MainLayout({
 
               {/* Email alert toggle — only shown when authenticated */}
               {emailSubscribed !== null && (
-                <button
-                  onClick={toggleEmail}
-                  disabled={emailToggling}
-                  title={emailSubscribed ? 'Email alerts on — click to disable' : 'Email alerts off — click to enable'}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all disabled:opacity-50 ${
-                    emailSubscribed
-                      ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20'
-                      : 'border-white/10 text-muted-foreground hover:bg-white/10 hover:text-foreground'
-                  }`}
-                >
-                  <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                  <span className="hidden sm:inline">{emailToggling ? '…' : emailSubscribed ? 'Alerts on' : 'Alerts off'}</span>
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={toggleEmail}
+                    disabled={emailToggling}
+                    title={emailSubscribed ? 'Email alerts on — click to disable' : 'Email alerts off — click to enable'}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all disabled:opacity-50 ${
+                      emailSubscribed
+                        ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20'
+                        : 'border-white/10 text-muted-foreground hover:bg-white/10 hover:text-foreground'
+                    }`}
+                  >
+                    <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    <span className="hidden sm:inline">{emailToggling ? '…' : emailSubscribed ? 'Alerts on' : 'Alerts off'}</span>
+                  </button>
+
+                  {emailSubscribed && (
+                    <button
+                      onClick={sendTest}
+                      disabled={testState === 'sending'}
+                      title="Send a test email to yourself"
+                      className={`p-1.5 rounded-lg border text-xs transition-all disabled:opacity-50 ${
+                        testState === 'ok'
+                          ? 'border-green-500/40 text-green-400'
+                          : testState === 'fail'
+                          ? 'border-red-500/40 text-red-400'
+                          : 'border-white/10 text-muted-foreground hover:bg-white/10 hover:text-foreground'
+                      }`}
+                    >
+                      {testState === 'sending' ? '…' : testState === 'ok' ? '✓' : testState === 'fail' ? '✗' : '✉'}
+                    </button>
+                  )}
+                </div>
               )}
 
               <a

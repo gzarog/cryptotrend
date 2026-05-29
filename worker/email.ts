@@ -104,6 +104,31 @@ async function sendEmail(
   }
 }
 
+// ─── Test email ───────────────────────────────────────────────────────────────
+
+export async function sendTestEmail(env: EmailEnv, to: string): Promise<boolean> {
+  return sendEmail(
+    env,
+    to,
+    '✅ CryptoTrendNotify — Test Email',
+    `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"/></head>
+<body style="margin:0;padding:32px;background:#0b0f1a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:480px;margin:0 auto;background:#111827;border-radius:12px;overflow:hidden;border:1px solid #1e2a3a;">
+    <div style="background:linear-gradient(135deg,#7c3aed,#0ea5e9);padding:24px 32px;">
+      <div style="font-size:20px;font-weight:700;color:#fff;">📈 CryptoTrend<strong>Notify</strong></div>
+    </div>
+    <div style="padding:24px 32px;">
+      <p style="color:#e2e8f0;font-size:15px;margin:0 0 8px;">Test email delivered successfully.</p>
+      <p style="color:#94a3b8;font-size:13px;margin:0;">Email alerts are configured correctly. You'll receive a digest like this whenever trading signals fire.</p>
+    </div>
+  </div>
+</body>
+</html>`
+  )
+}
+
 // ─── Digest email template ────────────────────────────────────────────────────
 
 function buildDigestHtml(alerts: AlertPayload[]): string {
