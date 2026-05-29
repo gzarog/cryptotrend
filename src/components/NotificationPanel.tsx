@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification, CustomNotification } from '../types/app'
 import { SYMBOLS } from '../constants/market'
 
@@ -222,26 +222,11 @@ export function NotificationPanel({
   onDeleteNotification,
   onAddCustomNotification,
 }: Props) {
-  const ref = useRef<HTMLDivElement>(null)
   const [filter, setFilter] = useState<FilterType>('all')
   const [showAddForm, setShowAddForm] = useState(false)
   const [addSymbol, setAddSymbol] = useState('BTCUSDT')
   const [addTitle, setAddTitle] = useState('')
   const [addBody, setAddBody] = useState('')
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    const timer = setTimeout(() => document.addEventListener('mousedown', handler), 0)
-    return () => {
-      clearTimeout(timer)
-      document.removeEventListener('mousedown', handler)
-    }
-  }, [open, onClose])
 
   if (!open) return null
 
@@ -277,10 +262,16 @@ export function NotificationPanel({
   }
 
   return (
-    <div
-      ref={ref}
-      className="absolute top-full right-0 mt-2 w-80 sm:w-[420px] max-h-[75vh] bg-card border border-white/10 shadow-2xl shadow-black/50 rounded-xl overflow-hidden z-[200] flex flex-col"
-    >
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-[199] bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      {/* Modal Panel */}
+      <div
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[200] w-[90vw] max-w-[540px] max-h-[80vh] bg-card border border-white/10 shadow-2xl shadow-black/50 rounded-xl overflow-hidden flex flex-col"
+      >
       {/* Header */}
       <div className="px-4 py-3 border-b border-white/5">
         <div className="flex items-center justify-between mb-2.5">
@@ -334,6 +325,16 @@ export function NotificationPanel({
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+            {/* Close button */}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground ml-1"
+              title="Close"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
@@ -486,6 +487,7 @@ export function NotificationPanel({
           </span>
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
