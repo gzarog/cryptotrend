@@ -1,11 +1,6 @@
 /**
- * Email notification service via Cloudflare Email Workers (send_email binding).
- * No third-party API — uses Cloudflare's native email infrastructure.
- *
- * Setup:
- *  1. Enable Email Routing on your Cloudflare domain
- *  2. Add [[send_email]] binding in wrangler.toml (see below)
- *  3. The "from" address must be on a domain with Email Routing active
+ * Email notification service via Resend API.
+ * Recipients are the logged-in Cloudflare Access users who toggled alerts on.
  */
 
 import type { AlertPayload } from './signals'
@@ -13,11 +8,11 @@ import type { AlertPayload } from './signals'
 export interface EmailEnv {
   EMAIL_SUBSCRIPTIONS: KVNamespace
   ALERT_COOLDOWNS: KVNamespace
-  EMAIL: SendEmail          // Cloudflare send_email binding
-  FROM_EMAIL: string        // e.g. alerts@yourdomain.com  (set in [vars])
+  RESEND_API_KEY: string
 }
 
 const SUBSCRIBERS_KEY = 'subscribers'
+const FROM_ADDRESS = 'CryptoTrendNotify <onboarding@resend.dev>'
 const COOLDOWN_TTL = 3600
 
 // ─── Subscriber storage ───────────────────────────────────────────────────────
@@ -54,49 +49,26 @@ export async function toggleSubscription(env: EmailEnv, email: string): Promise<
   return true
 }
 
-// ─── Raw MIME builder ─────────────────────────────────────────────────────────
-// Builds a minimal RFC 2822 / MIME 1.0 message for an HTML email.
-// No dependencies — avoids adding mimetext or similar packages.
+// ─── Send via Resend API ──────────────────────────────────────────────────────
 
-function buildRawEmail(from: string, to: string, subject: string, html: string): string {
-  // Encode subject as UTF-8 base64 (RFC 2047) so special chars are safe
-  const encodedSubject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`
-  return [
-    'MIME-Version: 1.0',
-    `From: CryptoTrendNotify <${from}>`,
-    `To: ${to}`,
-    `Subject: ${encodedSubject}`,
-    'Content-Type: text/html; charset=UTF-8',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    html,
-  ].join('\r\n')
-}
-
-// ─── Send via CF Email Workers ────────────────────────────────────────────────
-
-async function sendEmail(
-  env: EmailEnv,
-  to: string,
-  subject: string,
-  html: string
-): Promise<boolean> {
-  const from = env.FROM_EMAIL
-  if (!from) {
-    console.warn('FROM_EMAIL not set — skipping email')
+async function sendEmail(env: EmailEnv, to: string, subject: string, html: string): Promise<boolean> {
+  if (!env.RESEND_API_KEY) {
+    console.warn('RESEND_API_KEY not set — skipping email')
     return false
   }
   try {
-    const raw = buildRawEmail(from, to, subject, html)
-    const encoded = new TextEncoder().encode(raw)
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoded)
-        controller.close()
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ from: FROM_ADDRESS, to, subject, html }),
     })
-    const message = new EmailMessage(from, to, stream)
-    await env.EMAIL.send(message)
+    if (!res.ok) {
+      console.error(`Resend error ${res.status}:`, await res.text())
+      return false
+    }
     return true
   } catch (err) {
     console.error('sendEmail error:', err)

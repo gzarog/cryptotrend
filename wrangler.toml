@@ -27,23 +27,14 @@ id = "cfdb173091294911b9c9250f90c4c062"
 binding = "EMAIL_SUBSCRIPTIONS"
 id = "bb6e31167429490faa542b7c9ce980a5"
 
-# Cloudflare Email Workers binding — no third-party API needed.
-# Requires Email Routing to be enabled on your domain in the Cloudflare dashboard.
-# The FROM_EMAIL address must be on a domain with Email Routing active.
-# Docs: https://developers.cloudflare.com/email-routing/email-workers/send-email-workers/
-[[send_email]]
-name = "EMAIL"
-
 # VAPID public key (safe to commit)
 [vars]
 VAPID_SUBJECT = "mailto:admin@cryptotrend.app"
 VAPID_PUBLIC_KEY = "BMFQ4IxTfLtsjs5eZZkHg74cfXJgpmqVLiDhpQtiaFD73JEZEhDCo-jhNavMBpN3e3OBLkk6gXOoGbETN-hZu0U"
-# Replace with an address on your Email Routing-enabled domain:
-FROM_EMAIL = "alerts@yourdomain.com"
 
-# VAPID private key — set as a secret (never commit):
-# wrangler secret put VAPID_PRIVATE_KEY
-# Value: BkERp_XYe9JTJfqg9j2ftq0U08okhqt46sDLNaY9EA0
+# Secrets — set in Cloudflare dashboard → Workers & Pages → cryptotrend → Settings → Variables
+# VAPID_PRIVATE_KEY = "..."   (Web Push signing key)
+# RESEND_API_KEY = "..."      (Resend email API key)
 
 # Cron: run signal detection + push delivery every 5 minutes
 [triggers]
