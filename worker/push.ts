@@ -15,10 +15,11 @@ export interface Env {
   PUSH_SUBSCRIPTIONS: KVNamespace
   ALERT_COOLDOWNS: KVNamespace
   EMAIL_SUBSCRIPTIONS: KVNamespace
+  EMAIL: SendEmail
+  FROM_EMAIL: string
   VAPID_PUBLIC_KEY: string
   VAPID_PRIVATE_KEY: string
   VAPID_SUBJECT: string
-  RESEND_API_KEY: string
 }
 
 // ─── Base64url helpers ───────────────────────────────────────────────────────
