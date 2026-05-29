@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { NotificationPanel } from '../components/NotificationPanel'
+import { NotificationsManager } from '../components/NotificationsManager'
 import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification, CustomNotification } from '../types/app'
 import type { UnifiedNotification } from '../components/NotificationPanel'
 
@@ -25,6 +26,10 @@ interface MainLayoutProps {
   onDeleteNotification?: (id: string, type: UnifiedNotification['type']) => void
   onAddCustomNotification?: (notif: CustomNotification) => void
   unreadCount?: number
+  showNotifManager?: boolean
+  onToggleNotifManager?: () => void
+  onCloseNotifManager?: () => void
+  onEditCustomNotification?: (id: string, updates: { title: string; body: string; symbol: string }) => void
 }
 
 export function MainLayout({
@@ -49,6 +54,10 @@ export function MainLayout({
   onDeleteNotification,
   onAddCustomNotification,
   unreadCount = 0,
+  showNotifManager,
+  onToggleNotifManager,
+  onCloseNotifManager,
+  onEditCustomNotification,
 }: MainLayoutProps) {
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [emailSubscribed, setEmailSubscribed] = useState<boolean | null>(null) // null = unknown/loading
@@ -186,6 +195,17 @@ export function MainLayout({
             </>
           )}
 
+          {/* Notifications Manager button */}
+          <button
+            onClick={onToggleNotifManager}
+            className={`p-2 rounded-lg hover:bg-white/10 transition-colors relative ${showNotifManager ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}
+            title="Manage notifications"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+            </svg>
+          </button>
+
           {/* Bell with panel */}
           <div className="relative">
             <button
@@ -229,6 +249,25 @@ export function MainLayout({
           </div>
         </div>
       </header>
+
+      <NotificationsManager
+        open={!!showNotifManager}
+        onClose={() => onCloseNotifManager?.()}
+        userEmail={userEmail}
+        momentumNotifications={momentumNotifications}
+        crossNotifications={crossNotifications}
+        signalNotifications={signalNotifications}
+        divergenceNotifications={divergenceNotifications}
+        fundingNotifications={fundingNotifications}
+        regimeNotifications={regimeNotifications}
+        volatilityNotifications={volatilityNotifications}
+        correlationNotifications={correlationNotifications}
+        customNotifications={customNotifications}
+        readIds={readNotifIds}
+        onCreateCustom={(notif) => onAddCustomNotification?.(notif)}
+        onEditCustom={(id, updates) => onEditCustomNotification?.(id, updates)}
+        onDeleteNotification={(id, type) => onDeleteNotification?.(id, type)}
+      />
 
       {/* Main Content */}
       <main className="relative z-10 pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">

@@ -173,6 +173,7 @@ const Index = () => {
   const [barLimit, setBarLimit] = useState(400)
   const [showNotifDialog, setShowNotifDialog] = useState(false)
   const [showNotifPanel, setShowNotifPanel] = useState(false)
+  const [showNotifManager, setShowNotifManager] = useState(false)
   const [readNotifIds, setReadNotifIds] = useState<Set<string>>(() => loadSetFromStorage('read-notif-ids'))
 
   // Notification state — persist via localStorage
@@ -939,12 +940,20 @@ const Index = () => {
     setCustomNotifications(prev => [notif, ...prev].slice(0, 50))
   }, [])
 
+  const handleEditCustomNotification = useCallback((id: string, updates: { title: string; body: string; symbol: string }) => {
+    setCustomNotifications(prev => prev.map(n => n.id === id ? { ...n, ...updates } : n))
+  }, [])
+
   return (
     <MainLayout
       onNotificationClick={() => setShowNotifDialog(true)}
       showNotifPanel={showNotifPanel}
       onToggleNotifPanel={() => setShowNotifPanel(prev => !prev)}
       onCloseNotifPanel={() => setShowNotifPanel(false)}
+      showNotifManager={showNotifManager}
+      onToggleNotifManager={() => setShowNotifManager(prev => !prev)}
+      onCloseNotifManager={() => setShowNotifManager(false)}
+      onEditCustomNotification={handleEditCustomNotification}
       momentumNotifications={momentumNotifications}
       crossNotifications={crossNotifications}
       signalNotifications={signalNotifications}
