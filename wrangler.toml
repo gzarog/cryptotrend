@@ -25,7 +25,7 @@ id = "cfdb173091294911b9c9250f90c4c062"
 
 [[kv_namespaces]]
 binding = "EMAIL_SUBSCRIPTIONS"
-id = "REPLACE_WITH_EMAIL_SUBSCRIPTIONS_KV_ID"
+id = "96d8042aeee94e7297968e4c5b43b420"
 
 # Cloudflare Email Workers binding — no third-party API needed.
 # Requires Email Routing to be enabled on your domain in the Cloudflare dashboard.
