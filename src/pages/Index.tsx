@@ -23,7 +23,8 @@ import { createNotificationId, showBrowserNotification, getCooldown, playNotific
 import { calculateRiskLevels } from '../lib/risk'
 import { createInitialBayesianState, updateBayesianAccuracy } from '../lib/bayesian'
 import type { BayesianState } from '../lib/bayesian'
-import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification, CustomNotification } from '../types/app'
+import type { UnifiedNotification } from '../components/NotificationPanel'
 import type { TimeframeSignalSnapshot } from '../types/signals'
 
 // ─── Timeframe-Adaptive Settings ────────────────────────────────────────────
@@ -199,6 +200,9 @@ const Index = () => {
   const [correlationNotifications, setCorrelationNotifications] = useState<CorrelationBreakdownNotification[]>(
     () => loadFromStorage('correlation-notifications', [])
   )
+  const [customNotifications, setCustomNotifications] = useState<CustomNotification[]>(
+    () => loadFromStorage('custom-notifications', [])
+  )
   const prevCrossRef = useRef<Record<string, 'golden' | 'death' | null>>({})
 
   // Bayesian state for accuracy tracking
@@ -229,6 +233,9 @@ const Index = () => {
   useEffect(() => {
     localStorage.setItem('correlation-notifications', JSON.stringify(correlationNotifications.slice(0, 50)))
   }, [correlationNotifications])
+  useEffect(() => {
+    localStorage.setItem('custom-notifications', JSON.stringify(customNotifications.slice(0, 50)))
+  }, [customNotifications])
   useEffect(() => {
     localStorage.setItem('read-notif-ids', JSON.stringify([...readNotifIds]))
   }, [readNotifIds])
@@ -884,8 +891,9 @@ const Index = () => {
     for (const n of regimeNotifications) ids.push(n.id)
     for (const n of volatilityNotifications) ids.push(n.id)
     for (const n of correlationNotifications) ids.push(n.id)
+    for (const n of customNotifications) ids.push(n.id)
     return ids
-  }, [momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications, fundingNotifications, regimeNotifications, volatilityNotifications, correlationNotifications])
+  }, [momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications, fundingNotifications, regimeNotifications, volatilityNotifications, correlationNotifications, customNotifications])
 
   const unreadCount = useMemo(
     () => allNotifIds.filter(id => !readNotifIds.has(id)).length,
@@ -909,7 +917,26 @@ const Index = () => {
     setRegimeNotifications([])
     setVolatilityNotifications([])
     setCorrelationNotifications([])
+    setCustomNotifications([])
     setReadNotifIds(new Set())
+  }, [])
+
+  const handleDeleteNotification = useCallback((id: string, type: UnifiedNotification['type']) => {
+    const remove = <T extends { id: string }>(arr: T[]) => arr.filter(n => n.id !== id)
+    if (type === 'momentum') setMomentumNotifications(prev => remove(prev))
+    else if (type === 'cross') setCrossNotifications(prev => remove(prev))
+    else if (type === 'signal') setSignalNotifications(prev => remove(prev))
+    else if (type === 'divergence') setDivergenceNotifications(prev => remove(prev))
+    else if (type === 'funding') setFundingNotifications(prev => remove(prev))
+    else if (type === 'regime') setRegimeNotifications(prev => remove(prev))
+    else if (type === 'volatility') setVolatilityNotifications(prev => remove(prev))
+    else if (type === 'correlation') setCorrelationNotifications(prev => remove(prev))
+    else if (type === 'custom') setCustomNotifications(prev => remove(prev))
+    setReadNotifIds(prev => { const next = new Set(prev); next.delete(id); return next })
+  }, [])
+
+  const handleAddCustomNotification = useCallback((notif: CustomNotification) => {
+    setCustomNotifications(prev => [notif, ...prev].slice(0, 50))
   }, [])
 
   return (
@@ -926,10 +953,13 @@ const Index = () => {
       regimeNotifications={regimeNotifications}
       volatilityNotifications={volatilityNotifications}
       correlationNotifications={correlationNotifications}
+      customNotifications={customNotifications}
       readNotifIds={readNotifIds}
       onMarkRead={handleMarkRead}
       onMarkAllRead={handleMarkAllRead}
       onClearAllNotifs={handleClearAll}
+      onDeleteNotification={handleDeleteNotification}
+      onAddCustomNotification={handleAddCustomNotification}
       unreadCount={unreadCount}
     >
       <ControlBar

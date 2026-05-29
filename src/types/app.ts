@@ -187,6 +187,14 @@ export type CorrelationBreakdownNotification = {
   triggeredAt: number
 }
 
+export type CustomNotification = {
+  id: string
+  symbol: string
+  title: string
+  body: string
+  triggeredAt: number
+}
+
 export type TimeframeOption = {
   value: string
   label: string

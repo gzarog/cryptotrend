@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification, CustomNotification } from '../types/app'
+import { SYMBOLS } from '../constants/market'
 
 export type UnifiedNotification = {
   id: string
-  type: 'momentum' | 'cross' | 'signal' | 'divergence' | 'funding' | 'regime' | 'volatility' | 'correlation'
+  type: 'momentum' | 'cross' | 'signal' | 'divergence' | 'funding' | 'regime' | 'volatility' | 'correlation' | 'custom'
   title: string
   body: string
   symbol: string
@@ -13,7 +14,7 @@ export type UnifiedNotification = {
   priority?: string
 }
 
-type FilterType = 'all' | 'signal' | 'divergence' | 'market' | 'momentum' | 'cross'
+type FilterType = 'all' | 'signal' | 'divergence' | 'market' | 'momentum' | 'cross' | 'custom'
 
 type Props = {
   open: boolean
@@ -26,11 +27,14 @@ type Props = {
   regimeNotifications?: RegimeChangeNotification[]
   volatilityNotifications?: VolatilityBreakoutNotification[]
   correlationNotifications?: CorrelationBreakdownNotification[]
+  customNotifications?: CustomNotification[]
   readIds: Set<string>
   onMarkRead: (id: string) => void
   onMarkAllRead: () => void
   onClearAll: () => void
   onSettingsClick: () => void
+  onDeleteNotification: (id: string, type: UnifiedNotification['type']) => void
+  onAddCustomNotification: (notif: CustomNotification) => void
 }
 
 const MARKET_TYPES = new Set(['funding', 'regime', 'volatility', 'correlation'])
@@ -44,6 +48,7 @@ function unify(
   regime: RegimeChangeNotification[] = [],
   volatility: VolatilityBreakoutNotification[] = [],
   correlation: CorrelationBreakdownNotification[] = [],
+  custom: CustomNotification[] = [],
 ): UnifiedNotification[] {
   const items: UnifiedNotification[] = []
 
@@ -159,6 +164,19 @@ function unify(
     })
   }
 
+  for (const n of custom) {
+    items.push({
+      id: n.id,
+      type: 'custom',
+      title: n.title,
+      body: n.body,
+      symbol: n.symbol,
+      triggeredAt: n.triggeredAt,
+      accentClass: 'border-l-violet-500',
+      icon: '📌',
+    })
+  }
+
   return items.sort((a, b) => b.triggeredAt - a.triggeredAt)
 }
 
@@ -181,6 +199,7 @@ const FILTER_TABS: { key: FilterType; label: string }[] = [
   { key: 'market', label: 'Market' },
   { key: 'momentum', label: 'Momentum' },
   { key: 'cross', label: 'MA Cross' },
+  { key: 'custom', label: 'Custom' },
 ]
 
 export function NotificationPanel({
@@ -194,14 +213,21 @@ export function NotificationPanel({
   regimeNotifications = [],
   volatilityNotifications = [],
   correlationNotifications = [],
+  customNotifications = [],
   readIds,
   onMarkRead,
   onMarkAllRead,
   onClearAll,
   onSettingsClick,
+  onDeleteNotification,
+  onAddCustomNotification,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [filter, setFilter] = useState<FilterType>('all')
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [addSymbol, setAddSymbol] = useState('BTCUSDT')
+  const [addTitle, setAddTitle] = useState('')
+  const [addBody, setAddBody] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -219,7 +245,7 @@ export function NotificationPanel({
 
   if (!open) return null
 
-  const allItems = unify(momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications, fundingNotifications, regimeNotifications, volatilityNotifications, correlationNotifications)
+  const allItems = unify(momentumNotifications, crossNotifications, signalNotifications, divergenceNotifications, fundingNotifications, regimeNotifications, volatilityNotifications, correlationNotifications, customNotifications)
   const filteredItems = filter === 'all' ? allItems :
     filter === 'market' ? allItems.filter(i => MARKET_TYPES.has(i.type)) :
     allItems.filter(i => i.type === filter)
@@ -232,6 +258,22 @@ export function NotificationPanel({
     market: allItems.filter(i => MARKET_TYPES.has(i.type)).length,
     momentum: allItems.filter(i => i.type === 'momentum').length,
     cross: allItems.filter(i => i.type === 'cross').length,
+    custom: allItems.filter(i => i.type === 'custom').length,
+  }
+
+  const handleAddSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!addTitle.trim()) return
+    onAddCustomNotification({
+      id: `custom-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      symbol: addSymbol,
+      title: addTitle.trim(),
+      body: addBody.trim(),
+      triggeredAt: Date.now(),
+    })
+    setAddTitle('')
+    setAddBody('')
+    setShowAddForm(false)
   }
 
   return (
@@ -270,6 +312,20 @@ export function NotificationPanel({
                 Clear
               </button>
             )}
+            {/* Add custom notification button */}
+            <button
+              onClick={() => setShowAddForm(v => !v)}
+              className={`p-1.5 rounded-md transition-colors ${
+                showAddForm
+                  ? 'bg-primary/20 text-primary'
+                  : 'hover:bg-white/10 text-muted-foreground hover:text-foreground'
+              }`}
+              title="Add custom notification"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
             <button
               onClick={onSettingsClick}
               className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground"
@@ -282,6 +338,62 @@ export function NotificationPanel({
             </button>
           </div>
         </div>
+
+        {/* Add Custom Notification Form */}
+        {showAddForm && (
+          <form
+            onSubmit={handleAddSubmit}
+            className="mb-2.5 p-3 bg-black/20 rounded-lg space-y-2 border border-white/5"
+          >
+            <p className="text-[11px] font-medium text-primary flex items-center gap-1">
+              <span>📌</span> Add Custom Notification
+            </p>
+            <div className="flex gap-2">
+              <select
+                value={addSymbol}
+                onChange={e => setAddSymbol(e.target.value)}
+                className="flex-1 bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-primary/50"
+              >
+                {SYMBOLS.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <input
+              type="text"
+              placeholder="Title *"
+              value={addTitle}
+              onChange={e => setAddTitle(e.target.value)}
+              maxLength={80}
+              required
+              className="w-full bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50"
+            />
+            <input
+              type="text"
+              placeholder="Details (optional)"
+              value={addBody}
+              onChange={e => setAddBody(e.target.value)}
+              maxLength={160}
+              className="w-full bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                className="px-3 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!addTitle.trim()}
+                className="px-3 py-1 text-[11px] bg-primary/20 text-primary border border-primary/30 rounded hover:bg-primary/30 transition-colors disabled:opacity-40"
+              >
+                Add
+              </button>
+            </div>
+          </form>
+        )}
 
         {/* Filter Tabs */}
         <div className="flex gap-0.5 bg-black/20 rounded-lg p-0.5 overflow-x-auto">
@@ -316,36 +428,51 @@ export function NotificationPanel({
           filteredItems.map(item => {
             const isRead = readIds.has(item.id)
             return (
-              <button
+              <div
                 key={item.id}
-                onClick={() => !isRead && onMarkRead(item.id)}
-                className={`w-full text-left px-4 py-3 border-b border-white/5 border-l-4 ${item.accentClass} transition-all hover:bg-white/[0.03] ${
+                className={`group relative w-full text-left px-4 py-3 border-b border-white/5 border-l-4 ${item.accentClass} transition-all hover:bg-white/[0.03] ${
                   isRead ? 'opacity-50' : ''
                 }`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {!isRead && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                    )}
-                    <span className="text-sm shrink-0">{item.icon}</span>
-                    <span className={`text-xs font-medium truncate ${isRead ? 'text-muted-foreground' : 'text-foreground'}`}>
-                      {item.title}
-                    </span>
+                <button
+                  className="w-full text-left"
+                  onClick={() => !isRead && onMarkRead(item.id)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {!isRead && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                      )}
+                      <span className="text-sm shrink-0">{item.icon}</span>
+                      <span className={`text-xs font-medium truncate ${isRead ? 'text-muted-foreground' : 'text-foreground'}`}>
+                        {item.title}
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-end shrink-0 gap-0.5 pr-5">
+                      <span className="text-[10px] text-muted-foreground">
+                        {relativeTime(item.triggeredAt)}
+                      </span>
+                      <span className="text-[9px] text-muted-foreground/60">
+                        {item.symbol}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex flex-col items-end shrink-0 gap-0.5">
-                    <span className="text-[10px] text-muted-foreground">
-                      {relativeTime(item.triggeredAt)}
-                    </span>
-                    <span className="text-[9px] text-muted-foreground/60">
-                      {item.symbol}
-                    </span>
-                  </div>
-                </div>
-                <p className={`text-[11px] mt-0.5 ${isRead ? 'text-muted-foreground/60' : 'text-muted-foreground'} ${!isRead ? 'ml-[22px]' : 'ml-5'}`}>
-                  {item.body}
-                </p>
-              </button>
+                  <p className={`text-[11px] mt-0.5 ${isRead ? 'text-muted-foreground/60' : 'text-muted-foreground'} ${!isRead ? 'ml-[22px]' : 'ml-5'}`}>
+                    {item.body}
+                  </p>
+                </button>
+
+                {/* Delete button */}
+                <button
+                  onClick={e => { e.stopPropagation(); onDeleteNotification(item.id, item.type) }}
+                  className="absolute top-2.5 right-2.5 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 text-muted-foreground hover:text-destructive transition-all"
+                  title="Delete notification"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             )
           })
         )}

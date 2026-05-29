@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { NotificationPanel } from '../components/NotificationPanel'
-import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
+import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification, CustomNotification } from '../types/app'
+import type { UnifiedNotification } from '../components/NotificationPanel'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -16,10 +17,13 @@ interface MainLayoutProps {
   regimeNotifications?: RegimeChangeNotification[]
   volatilityNotifications?: VolatilityBreakoutNotification[]
   correlationNotifications?: CorrelationBreakdownNotification[]
+  customNotifications?: CustomNotification[]
   readNotifIds?: Set<string>
   onMarkRead?: (id: string) => void
   onMarkAllRead?: () => void
   onClearAllNotifs?: () => void
+  onDeleteNotification?: (id: string, type: UnifiedNotification['type']) => void
+  onAddCustomNotification?: (notif: CustomNotification) => void
   unreadCount?: number
 }
 
@@ -37,10 +41,13 @@ export function MainLayout({
   regimeNotifications = [],
   volatilityNotifications = [],
   correlationNotifications = [],
+  customNotifications = [],
   readNotifIds = new Set(),
   onMarkRead,
   onMarkAllRead,
   onClearAllNotifs,
+  onDeleteNotification,
+  onAddCustomNotification,
   unreadCount = 0,
 }: MainLayoutProps) {
   const [userEmail, setUserEmail] = useState<string | null>(null)
@@ -207,10 +214,13 @@ export function MainLayout({
               regimeNotifications={regimeNotifications}
               volatilityNotifications={volatilityNotifications}
               correlationNotifications={correlationNotifications}
+              customNotifications={customNotifications}
               readIds={readNotifIds}
               onMarkRead={(id) => onMarkRead?.(id)}
               onMarkAllRead={() => onMarkAllRead?.()}
               onClearAll={() => onClearAllNotifs?.()}
+              onDeleteNotification={(id, type) => onDeleteNotification?.(id, type)}
+              onAddCustomNotification={(notif) => onAddCustomNotification?.(notif)}
               onSettingsClick={() => {
                 onCloseNotifPanel?.()
                 onNotificationClick?.()
