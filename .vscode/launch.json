@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Chrome (local dev)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8080",
+      "webRoot": "${workspaceFolder}/src",
+      "sourceMapPathOverrides": {
+        "webpack:///src/*": "${webRoot}/*"
+      },
+      "preLaunchTask": "Dev (local)"
+    },
+    {
+      "name": "Launch Chrome (CF Access tunnel)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8787",
+      "webRoot": "${workspaceFolder}/src",
+      "preLaunchTask": "Dev with CF Access"
+    }
+  ]
+}

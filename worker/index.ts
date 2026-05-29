@@ -17,6 +17,12 @@ function json(data: unknown, status = 200): Response {
   })
 }
 
+function getAuthEmail(request: Request, env: Env): string | null {
+  return request.headers.get('Cf-Access-Authenticated-User-Email')
+    ?? env.DEV_USER_EMAIL
+    ?? null
+}
+
 function corsHeaders(): HeadersInit {
   return {
     'Access-Control-Allow-Origin': '*',
@@ -68,7 +74,7 @@ export default {
     // ── Auth ─────────────────────────────────────────────────────────────
 
     if (request.method === 'GET' && url.pathname === '/api/me') {
-      const email = request.headers.get('Cf-Access-Authenticated-User-Email')
+      const email = getAuthEmail(request, env)
       return json({ email: email ?? null })
     }
 
@@ -76,7 +82,7 @@ export default {
 
     // GET /api/email/status — is the current user subscribed?
     if (request.method === 'GET' && url.pathname === '/api/email/status') {
-      const email = request.headers.get('Cf-Access-Authenticated-User-Email')
+      const email = getAuthEmail(request, env)
       if (!email) return json({ subscribed: false, email: null })
       try {
         const subscribed = await isSubscribed(env, email)
@@ -89,7 +95,7 @@ export default {
 
     // POST /api/email/test — send a test email to the current CF Access user
     if (request.method === 'POST' && url.pathname === '/api/email/test') {
-      const email = request.headers.get('Cf-Access-Authenticated-User-Email')
+      const email = getAuthEmail(request, env)
       if (!email) return json({ error: 'Not authenticated via Cloudflare Access' }, 401)
       try {
         const ok = await sendTestEmail(env, email)
@@ -102,7 +108,7 @@ export default {
 
     // POST /api/email/toggle — flip subscription state for current user
     if (request.method === 'POST' && url.pathname === '/api/email/toggle') {
-      const email = request.headers.get('Cf-Access-Authenticated-User-Email')
+      const email = getAuthEmail(request, env)
       if (!email) return json({ error: 'Not authenticated via Cloudflare Access' }, 401)
       try {
         const nowEnabled = await toggleSubscription(env, email)

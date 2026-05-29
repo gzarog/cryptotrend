@@ -1,10 +1,67 @@
 {
   "version": "2.0.0",
   "tasks": [
+    // ── Fast local dev (HMR, no tunnel) ──────────────────────────────────────
+    {
+      "label": "vite: dev",
+      "type": "shell",
+      "command": "npm run dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE",
+          "endsPattern": "ready in"
+        }
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "label": "Vite"
+      }
+    },
+    {
+      "label": "wrangler: dev (local)",
+      "type": "shell",
+      "command": "npx wrangler dev --port 8787",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "wrangler",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Starting",
+          "endsPattern": "Ready on"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "label": "Worker"
+      }
+    },
+    {
+      "label": "Dev (local)",
+      "dependsOn": ["vite: dev", "wrangler: dev (local)"],
+      "dependsOrder": "parallel",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+
+    // ── Full CF Access dev (tunnel) ───────────────────────────────────────────
     {
       "label": "vite: build watch",
       "type": "shell",
-      "command": "npm run build:dev -- --watch",
+      "command": "npm run build:watch",
       "isBackground": true,
       "problemMatcher": {
         "owner": "vite",
@@ -22,11 +79,10 @@
           "endsPattern": "built in"
         }
       },
-      "group": "build",
       "presentation": {
         "reveal": "silent",
         "panel": "dedicated",
-        "label": "Vite"
+        "label": "Vite (build)"
       }
     },
     {
@@ -75,15 +131,12 @@
       "label": "Dev with CF Access",
       "dependsOn": ["vite: build watch", "wrangler: dev", "cloudflared: tunnel"],
       "dependsOrder": "sequence",
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
+      "group": "build",
+      "problemMatcher": [],
       "presentation": {
         "reveal": "always",
         "panel": "shared"
-      },
-      "problemMatcher": []
+      }
     }
   ]
 }
