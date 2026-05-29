@@ -1,114 +1,62 @@
 /**
  * Email notification service via Resend API.
- * Recipients are managed by an admin — no user self-subscription.
+ * Recipients are the logged-in Cloudflare Access users who toggled alerts on.
+ * The email address comes from the Cf-Access-Authenticated-User-Email header.
  */
 
 import type { AlertPayload } from './signals'
-
-export interface EmailRecipient {
-  email: string
-  enabled: boolean
-  symbols: string[]      // ['BTCUSDT', 'ETHUSDT'] — empty means all
-  signalTypes: string[]  // ['momentum', 'macross', 'funding'] — empty means all
-}
-
-export interface EmailConfig {
-  enabled: boolean        // global kill-switch
-  recipients: EmailRecipient[]
-}
 
 export interface EmailEnv {
   EMAIL_SUBSCRIPTIONS: KVNamespace
   ALERT_COOLDOWNS: KVNamespace
   RESEND_API_KEY: string
-  ADMIN_SECRET: string    // required header: X-Admin-Secret
 }
 
-const CONFIG_KEY = 'config'
+const SUBSCRIBERS_KEY = 'subscribers'
 const FROM_ADDRESS = 'CryptoTrendNotify <alerts@cryptotrend.app>'
 const COOLDOWN_TTL = 3600
 
-// ─── Config storage ───────────────────────────────────────────────────────────
+// ─── Subscriber storage ───────────────────────────────────────────────────────
 
-export async function getEmailConfig(env: EmailEnv): Promise<EmailConfig> {
-  const raw = await env.EMAIL_SUBSCRIPTIONS.get(CONFIG_KEY)
-  if (!raw) return { enabled: true, recipients: [] }
+async function loadSubscribers(env: EmailEnv): Promise<string[]> {
+  const raw = await env.EMAIL_SUBSCRIPTIONS.get(SUBSCRIBERS_KEY)
+  if (!raw) return []
   try {
-    return JSON.parse(raw) as EmailConfig
+    return JSON.parse(raw) as string[]
   } catch {
-    return { enabled: true, recipients: [] }
+    return []
   }
 }
 
-export async function saveEmailConfig(env: EmailEnv, config: EmailConfig): Promise<void> {
-  await env.EMAIL_SUBSCRIPTIONS.put(CONFIG_KEY, JSON.stringify(config))
+async function saveSubscribers(env: EmailEnv, emails: string[]): Promise<void> {
+  await env.EMAIL_SUBSCRIPTIONS.put(SUBSCRIBERS_KEY, JSON.stringify(emails))
 }
 
-// ─── Admin helpers ────────────────────────────────────────────────────────────
-
-export async function addRecipient(env: EmailEnv, recipient: EmailRecipient): Promise<void> {
-  const config = await getEmailConfig(env)
-  const idx = config.recipients.findIndex((r) => r.email === recipient.email)
-  if (idx >= 0) {
-    config.recipients[idx] = recipient
-  } else {
-    config.recipients.push(recipient)
-  }
-  await saveEmailConfig(env, config)
+export async function isSubscribed(env: EmailEnv, email: string): Promise<boolean> {
+  const subs = await loadSubscribers(env)
+  return subs.includes(email)
 }
 
-export async function removeRecipient(env: EmailEnv, email: string): Promise<void> {
-  const config = await getEmailConfig(env)
-  config.recipients = config.recipients.filter((r) => r.email !== email)
-  await saveEmailConfig(env, config)
-}
-
-export async function updateRecipient(
+export async function toggleSubscription(
   env: EmailEnv,
-  email: string,
-  patch: Partial<Omit<EmailRecipient, 'email'>>
-): Promise<void> {
-  const config = await getEmailConfig(env)
-  const idx = config.recipients.findIndex((r) => r.email === email)
-  if (idx >= 0) Object.assign(config.recipients[idx], patch)
-  await saveEmailConfig(env, config)
-}
-
-export async function setGlobalEnabled(env: EmailEnv, enabled: boolean): Promise<void> {
-  const config = await getEmailConfig(env)
-  config.enabled = enabled
-  await saveEmailConfig(env, config)
-}
-
-// ─── Signal matching ──────────────────────────────────────────────────────────
-
-function signalTypeFromTag(tag: string): string {
-  if (tag.startsWith('momentum-')) return 'momentum'
-  if (tag.startsWith('macross-')) return 'macross'
-  if (tag.startsWith('funding-')) return 'funding'
-  return 'other'
-}
-
-function symbolFromTag(tag: string): string {
-  return tag.split('-')[1] ?? ''
-}
-
-function alertMatchesRecipient(alert: AlertPayload, r: EmailRecipient): boolean {
-  const symbol = symbolFromTag(alert.tag)
-  const type = signalTypeFromTag(alert.tag)
-  const symbolMatch = r.symbols.length === 0 || r.symbols.includes(symbol)
-  const typeMatch = r.signalTypes.length === 0 || r.signalTypes.includes(type)
-  return symbolMatch && typeMatch
+  email: string
+): Promise<boolean> {
+  const subs = await loadSubscribers(env)
+  const idx = subs.indexOf(email)
+  if (idx >= 0) {
+    subs.splice(idx, 1)
+    await saveSubscribers(env, subs)
+    return false // now off
+  } else {
+    subs.push(email)
+    await saveSubscribers(env, subs)
+    return true // now on
+  }
 }
 
 // ─── Email sending ────────────────────────────────────────────────────────────
 
-export async function sendEmail(
-  env: EmailEnv,
-  to: string,
-  subject: string,
-  html: string
-): Promise<boolean> {
+async function sendEmail(env: EmailEnv, to: string, subject: string, html: string): Promise<boolean> {
   if (!env.RESEND_API_KEY) {
     console.warn('RESEND_API_KEY not set — skipping email')
     return false
@@ -164,7 +112,7 @@ function buildDigestHtml(alerts: AlertPayload[]): string {
         <table width="100%" cellpadding="0" cellspacing="0">${rows}</table>
         <tr>
           <td style="padding:16px 24px;border-top:1px solid #1e2a3a;text-align:center;">
-            <div style="font-size:11px;color:#4b5563;">Managed by the CryptoTrendNotify admin panel.</div>
+            <div style="font-size:11px;color:#4b5563;">You're receiving this because you enabled email alerts on CryptoTrendNotify.</div>
           </td>
         </tr>
       </table>
@@ -174,7 +122,7 @@ function buildDigestHtml(alerts: AlertPayload[]): string {
 </html>`
 }
 
-// ─── Main: send email notifications for a cron run ───────────────────────────
+// ─── Main: called from cron scheduler ────────────────────────────────────────
 
 export async function sendEmailNotifications(
   env: EmailEnv,
@@ -182,21 +130,16 @@ export async function sendEmailNotifications(
 ): Promise<void> {
   if (!alerts.length) return
 
-  const config = await getEmailConfig(env)
-  if (!config.enabled || !config.recipients.length) return
-
-  const activeRecipients = config.recipients.filter((r) => r.enabled)
-  if (!activeRecipients.length) return
+  const subscribers = await loadSubscribers(env)
+  if (!subscribers.length) return
 
   await Promise.allSettled(
-    activeRecipients.map(async (r) => {
-      const matching = alerts.filter((a) => alertMatchesRecipient(a, r))
-      if (!matching.length) return
-
+    subscribers.map(async (email) => {
+      // Per-subscriber cooldown to avoid duplicate alerts
       const freshAlerts = (
         await Promise.all(
-          matching.map(async (a) => {
-            const key = `email:${r.email}:${a.tag}`
+          alerts.map(async (a) => {
+            const key = `email:${email}:${a.tag}`
             const inCooldown = (await env.ALERT_COOLDOWNS.get(key)) !== null
             return inCooldown ? null : a
           })
@@ -210,16 +153,16 @@ export async function sendEmailNotifications(
           ? freshAlerts[0].title
           : `${freshAlerts.length} crypto signals detected`
 
-      const sent = await sendEmail(env, r.email, subject, buildDigestHtml(freshAlerts))
+      const sent = await sendEmail(env, email, subject, buildDigestHtml(freshAlerts))
       if (sent) {
         await Promise.allSettled(
           freshAlerts.map((a) =>
-            env.ALERT_COOLDOWNS.put(`email:${r.email}:${a.tag}`, '1', {
+            env.ALERT_COOLDOWNS.put(`email:${email}:${a.tag}`, '1', {
               expirationTtl: COOLDOWN_TTL,
             })
           )
         )
-        console.log(`Email sent to ${r.email} (${freshAlerts.length} alerts)`)
+        console.log(`Email sent to ${email} (${freshAlerts.length} alerts)`)
       }
     })
   )

@@ -39,9 +39,6 @@ VAPID_PUBLIC_KEY = "BMFQ4IxTfLtsjs5eZZkHg74cfXJgpmqVLiDhpQtiaFD73JEZEhDCo-jhNavM
 # Resend API key for email notifications — set as a secret (never commit):
 # wrangler secret put RESEND_API_KEY
 
-# Admin panel secret (required in X-Admin-Secret header) — set as a secret (never commit):
-# wrangler secret put ADMIN_SECRET
-
 # Cron: run signal detection + push delivery every 5 minutes
 [triggers]
 crons = ["*/5 * * * *"]

@@ -1,23 +1,14 @@
 /**
  * Cloudflare Worker entry point.
  * - Handles push subscription API routes
- * - Handles admin API routes for email notification management
+ * - Handles email alert toggle for the CF-Access authenticated user
  * - Handles cron triggers for signal detection + push/email delivery
- * - Falls through to static assets for all other requests
  */
 
 import type { Env } from './push'
 import { addSubscription, removeSubscription } from './kv'
 import { handleScheduled } from './scheduler'
-import {
-  getEmailConfig,
-  saveEmailConfig,
-  addRecipient,
-  removeRecipient,
-  updateRecipient,
-  setGlobalEnabled,
-  sendEmail,
-} from './email'
+import { isSubscribed, toggleSubscription } from './email'
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -29,19 +20,12 @@ function json(data: unknown, status = 200): Response {
 function corsHeaders(): HeadersInit {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Secret',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
   }
 }
 
-function isAdminAuthorized(request: Request, env: Env): boolean {
-  const secret = request.headers.get('X-Admin-Secret')
-  return !!env.ADMIN_SECRET && secret === env.ADMIN_SECRET
-}
-
 export default {
-  // ─── HTTP handler ────────────────────────────────────────────────────────
-
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
@@ -88,118 +72,36 @@ export default {
       return json({ email: email ?? null })
     }
 
-    // ── Admin: email notification management ─────────────────────────────
-    // All /admin/api/* routes require X-Admin-Secret header.
+    // ── Email alert toggle (uses CF Access identity) ──────────────────────
 
-    if (url.pathname.startsWith('/admin/api/')) {
-      if (!isAdminAuthorized(request, env)) {
-        return json({ error: 'Unauthorized' }, 401)
+    // GET /api/email/status — is the current user subscribed?
+    if (request.method === 'GET' && url.pathname === '/api/email/status') {
+      const email = request.headers.get('Cf-Access-Authenticated-User-Email')
+      if (!email) return json({ subscribed: false, email: null })
+      try {
+        const subscribed = await isSubscribed(env, email)
+        return json({ subscribed, email })
+      } catch (err) {
+        console.error('email status error:', err)
+        return json({ error: 'Failed to check status' }, 500)
       }
+    }
 
-      // GET /admin/api/email — return full config
-      if (request.method === 'GET' && url.pathname === '/admin/api/email') {
-        try {
-          const config = await getEmailConfig(env)
-          return json(config)
-        } catch (err) {
-          console.error('admin email get error:', err)
-          return json({ error: 'Failed to load config' }, 500)
-        }
+    // POST /api/email/toggle — flip subscription state for current user
+    if (request.method === 'POST' && url.pathname === '/api/email/toggle') {
+      const email = request.headers.get('Cf-Access-Authenticated-User-Email')
+      if (!email) return json({ error: 'Not authenticated via Cloudflare Access' }, 401)
+      try {
+        const nowEnabled = await toggleSubscription(env, email)
+        return json({ subscribed: nowEnabled, email })
+      } catch (err) {
+        console.error('email toggle error:', err)
+        return json({ error: 'Failed to toggle subscription' }, 500)
       }
-
-      // PATCH /admin/api/email — toggle global enabled flag
-      if (request.method === 'PATCH' && url.pathname === '/admin/api/email') {
-        try {
-          const body = await request.json() as { enabled?: boolean }
-          if (typeof body?.enabled !== 'boolean') return json({ error: 'enabled (boolean) required' }, 400)
-          await setGlobalEnabled(env, body.enabled)
-          return json({ ok: true })
-        } catch (err) {
-          console.error('admin email patch error:', err)
-          return json({ error: 'Failed to update config' }, 500)
-        }
-      }
-
-      // POST /admin/api/email/recipients — add or update a recipient
-      if (request.method === 'POST' && url.pathname === '/admin/api/email/recipients') {
-        try {
-          const body = await request.json() as {
-            email?: string
-            enabled?: boolean
-            symbols?: string[]
-            signalTypes?: string[]
-          }
-          if (!body?.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
-            return json({ error: 'Valid email required' }, 400)
-          }
-          await addRecipient(env, {
-            email: body.email,
-            enabled: body.enabled ?? true,
-            symbols: body.symbols ?? [],
-            signalTypes: body.signalTypes ?? [],
-          })
-          return json({ ok: true }, 201)
-        } catch (err) {
-          console.error('admin add recipient error:', err)
-          return json({ error: 'Failed to add recipient' }, 500)
-        }
-      }
-
-      // PATCH /admin/api/email/recipients/:email — update enabled/symbols/signalTypes
-      const patchMatch = url.pathname.match(/^\/admin\/api\/email\/recipients\/(.+)$/)
-      if (request.method === 'PATCH' && patchMatch) {
-        try {
-          const email = decodeURIComponent(patchMatch[1])
-          const body = await request.json() as Partial<{ enabled: boolean; symbols: string[]; signalTypes: string[] }>
-          await updateRecipient(env, email, body)
-          return json({ ok: true })
-        } catch (err) {
-          console.error('admin update recipient error:', err)
-          return json({ error: 'Failed to update recipient' }, 500)
-        }
-      }
-
-      // DELETE /admin/api/email/recipients/:email — remove a recipient
-      const deleteMatch = url.pathname.match(/^\/admin\/api\/email\/recipients\/(.+)$/)
-      if (request.method === 'DELETE' && deleteMatch) {
-        try {
-          const email = decodeURIComponent(deleteMatch[1])
-          await removeRecipient(env, email)
-          return json({ ok: true })
-        } catch (err) {
-          console.error('admin delete recipient error:', err)
-          return json({ error: 'Failed to remove recipient' }, 500)
-        }
-      }
-
-      // POST /admin/api/email/test — send a test email to a specific address
-      if (request.method === 'POST' && url.pathname === '/admin/api/email/test') {
-        try {
-          const body = await request.json() as { email?: string }
-          if (!body?.email) return json({ error: 'email required' }, 400)
-          const ok = await sendEmail(
-            env,
-            body.email,
-            '✅ CryptoTrendNotify — Test Email',
-            `<p style="font-family:sans-serif;color:#e2e8f0;background:#111827;padding:24px;border-radius:8px;">
-              Test email from <strong>CryptoTrendNotify</strong>.<br/>
-              Email notifications are configured correctly.
-            </p>`
-          )
-          return json({ ok })
-        } catch (err) {
-          console.error('admin test email error:', err)
-          return json({ error: 'Failed to send test email' }, 500)
-        }
-      }
-
-      return json({ error: 'Not found' }, 404)
     }
 
     return new Response('Not found', { status: 404 })
   },
-
-  // ─── Cron trigger ────────────────────────────────────────────────────────
 
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(handleScheduled(env))

@@ -19,7 +19,6 @@ export interface Env {
   VAPID_PRIVATE_KEY: string
   VAPID_SUBJECT: string
   RESEND_API_KEY: string
-  ADMIN_SECRET: string
 }
 
 // ─── Base64url helpers ───────────────────────────────────────────────────────
