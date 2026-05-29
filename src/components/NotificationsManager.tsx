@@ -1,7 +1,51 @@
 import { useState } from 'react'
 import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification, CustomNotification } from '../types/app'
 import { SYMBOLS } from '../constants/market'
-import { unify, type UnifiedNotification } from './NotificationPanel'
+import type { UnifiedNotification } from './NotificationPanel'
+
+function unify(
+  momentum: MomentumNotification[],
+  cross: MovingAverageCrossNotification[],
+  signals: SignalNotification[] = [],
+  divergences: DivergenceNotification[] = [],
+  funding: FundingRateNotification[] = [],
+  regime: RegimeChangeNotification[] = [],
+  volatility: VolatilityBreakoutNotification[] = [],
+  correlation: CorrelationBreakdownNotification[] = [],
+  custom: CustomNotification[] = [],
+): UnifiedNotification[] {
+  const items: UnifiedNotification[] = []
+
+  for (const n of momentum) {
+    items.push({ id: n.id, type: 'momentum', title: n.label, body: `${n.timeframeSummary} • RSI: ${n.rsiSummary} • Stoch: ${n.stochasticSummary}`, symbol: n.symbol, triggeredAt: n.triggeredAt, accentClass: n.direction === 'long' ? 'border-l-green-500' : 'border-l-red-500', icon: n.direction === 'long' ? '🟢' : '🔴' })
+  }
+  for (const n of cross) {
+    items.push({ id: n.id, type: 'cross', title: `${n.direction === 'golden' ? 'Golden' : 'Death'} Cross — ${n.pairLabel}`, body: `${n.timeframeLabel} • $${n.price.toLocaleString()}`, symbol: n.symbol, triggeredAt: n.triggeredAt, accentClass: n.direction === 'golden' ? 'border-l-yellow-500' : 'border-l-purple-500', icon: n.direction === 'golden' ? '🟡' : '🟣' })
+  }
+  for (const n of signals) {
+    items.push({ id: n.id, type: 'signal', title: `${n.confluenceCount}-TF ${n.direction.toUpperCase()} Confluence`, body: `${n.timeframes.join(', ')} • Avg: ${(n.avgConfidence * 100).toFixed(0)}%`, symbol: n.symbol, triggeredAt: n.triggeredAt, accentClass: n.direction === 'long' ? 'border-l-emerald-500' : 'border-l-orange-500', icon: n.direction === 'long' ? '📈' : '📉', priority: n.priority })
+  }
+  for (const n of divergences) {
+    items.push({ id: n.id, type: 'divergence', title: `${n.variant.charAt(0).toUpperCase() + n.variant.slice(1)} ${n.divergenceType} divergence`, body: `${n.timeframeLabel} • ${n.indicator.replace('divergence-', '').toUpperCase()}`, symbol: n.symbol, triggeredAt: n.triggeredAt, accentClass: n.divergenceType === 'bullish' ? 'border-l-cyan-500' : 'border-l-pink-500', icon: n.divergenceType === 'bullish' ? '🔵' : '🔻', priority: n.priority })
+  }
+  for (const n of funding) {
+    items.push({ id: n.id, type: 'funding', title: `Extreme Funding — ${n.direction === 'longs_paying' ? 'Longs paying' : 'Shorts paying'}`, body: `Rate: ${(n.rate * 100).toFixed(4)}%`, symbol: n.symbol, triggeredAt: n.triggeredAt, accentClass: 'border-l-amber-500', icon: '💰', priority: n.priority })
+  }
+  for (const n of regime) {
+    items.push({ id: n.id, type: 'regime', title: `Regime: ${n.fromRegime} → ${n.toRegime}`, body: `Hurst: ${n.hurstValue.toFixed(3)}`, symbol: n.symbol, triggeredAt: n.triggeredAt, accentClass: n.toRegime === 'trending' ? 'border-l-blue-500' : n.toRegime === 'mean-reverting' ? 'border-l-amber-500' : 'border-l-gray-500', icon: '🔄', priority: n.priority })
+  }
+  for (const n of volatility) {
+    items.push({ id: n.id, type: 'volatility', title: 'Volatility Spike', body: `Percentile: ${n.volatilityPercentile.toFixed(0)}%`, symbol: n.symbol, triggeredAt: n.triggeredAt, accentClass: 'border-l-rose-500', icon: '⚡', priority: n.priority })
+  }
+  for (const n of correlation) {
+    items.push({ id: n.id, type: 'correlation', title: `${n.asset} Decoupled`, body: `Correlation: ${n.correlation.toFixed(3)} (was ${n.previousCorrelation.toFixed(3)})`, symbol: n.symbol, triggeredAt: n.triggeredAt, accentClass: 'border-l-red-500', icon: '🔗', priority: n.priority })
+  }
+  for (const n of custom) {
+    items.push({ id: n.id, type: 'custom', title: n.title, body: n.body, symbol: n.symbol, triggeredAt: n.triggeredAt, accentClass: 'border-l-violet-500', icon: '📌' })
+  }
+
+  return items.sort((a, b) => b.triggeredAt - a.triggeredAt)
+}
 
 type ManagerTab = 'all' | 'custom' | 'system'
 

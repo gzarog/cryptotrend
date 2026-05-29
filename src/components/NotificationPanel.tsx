@@ -39,7 +39,7 @@ type Props = {
 
 const MARKET_TYPES = new Set(['funding', 'regime', 'volatility', 'correlation'])
 
-export function unify(
+function unify(
   momentum: MomentumNotification[],
   cross: MovingAverageCrossNotification[],
   signals: SignalNotification[] = [],
