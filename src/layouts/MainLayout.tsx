@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { NotificationPanel } from '../components/NotificationPanel'
+import { EmailNotificationSettings } from '../components/EmailNotificationSettings'
 import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
 
 interface MainLayoutProps {
@@ -47,6 +48,7 @@ export function MainLayout({
   // is served behind Access. Outside Access (e.g. local dev) /api/me returns
   // { email: null } and this renders nothing.
   const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [showEmailSettings, setShowEmailSettings] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -137,6 +139,7 @@ export function MainLayout({
             onClearAll={() => onClearAllNotifs?.()}
             onSettingsClick={() => {
               onCloseNotifPanel?.()
+              setShowEmailSettings(true)
               onNotificationClick?.()
             }}
           />
@@ -147,6 +150,11 @@ export function MainLayout({
       <main className="relative z-10 pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
         {children}
       </main>
+
+      <EmailNotificationSettings
+        open={showEmailSettings}
+        onClose={() => setShowEmailSettings(false)}
+      />
     </div>
   )
 }

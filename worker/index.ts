@@ -8,6 +8,7 @@
 import type { Env } from './push'
 import { addSubscription, removeSubscription } from './kv'
 import { handleScheduled } from './scheduler'
+import { subscribeEmail, unsubscribeEmail, getEmailSubscribers } from './email'
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -19,7 +20,7 @@ function json(data: unknown, status = 200): Response {
 function corsHeaders(): HeadersInit {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   }
 }
@@ -66,6 +67,54 @@ export default {
     // GET /api/push/status (health check)
     if (request.method === 'GET' && url.pathname === '/api/push/status') {
       return json({ ok: true, ts: Date.now() })
+    }
+
+    // POST /api/email/subscribe
+    if (request.method === 'POST' && url.pathname === '/api/email/subscribe') {
+      try {
+        const body = await request.json() as {
+          email?: string
+          symbols?: string[]
+          signalTypes?: string[]
+        }
+        if (!body?.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
+          return json({ error: 'Valid email required' }, 400)
+        }
+        await subscribeEmail(env, body.email, {
+          symbols: body.symbols,
+          signalTypes: body.signalTypes,
+        })
+        return json({ ok: true }, 201)
+      } catch (err) {
+        console.error('email subscribe error:', err)
+        return json({ error: 'Failed to save email subscription' }, 500)
+      }
+    }
+
+    // DELETE /api/email/unsubscribe
+    if (request.method === 'DELETE' && url.pathname === '/api/email/unsubscribe') {
+      try {
+        const body = await request.json() as { email?: string }
+        if (!body?.email) return json({ error: 'Missing email' }, 400)
+        await unsubscribeEmail(env, body.email)
+        return json({ ok: true })
+      } catch (err) {
+        console.error('email unsubscribe error:', err)
+        return json({ error: 'Failed to remove email subscription' }, 500)
+      }
+    }
+
+    // GET /api/email/status — returns subscription for the requesting user
+    if (request.method === 'GET' && url.pathname === '/api/email/status') {
+      try {
+        const cfEmail = request.headers.get('Cf-Access-Authenticated-User-Email')
+        const subscribers = await getEmailSubscribers(env)
+        const sub = cfEmail ? subscribers.find((s) => s.email === cfEmail) ?? null : null
+        return json({ subscriberCount: subscribers.length, subscription: sub })
+      } catch (err) {
+        console.error('email status error:', err)
+        return json({ error: 'Failed to read email subscriptions' }, 500)
+      }
     }
 
     // GET /api/me — returns the Cloudflare Access authenticated user, if any.
