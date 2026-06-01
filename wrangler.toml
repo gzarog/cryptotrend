@@ -32,6 +32,11 @@ binding = "SIGNAL_CACHE"
 id = "5955f643efd5405185a0032d7d18385d"
 # Run: wrangler kv:namespace create SIGNAL_CACHE  then paste the id above
 
+[[kv_namespaces]]
+binding = "NOTIFICATION_PREFERENCES"
+id = "f8440d2775394f5ba7a4ffb757d36205"
+# Run: wrangler kv:namespace create NOTIFICATION_PREFERENCES  then replace the id above
+
 # VAPID public key (safe to commit)
 [vars]
 VAPID_SUBJECT = "mailto:admin@cryptotrend.app"

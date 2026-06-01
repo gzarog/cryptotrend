@@ -56,6 +56,10 @@ export async function toggleSubscription(env: EmailEnv, email: string): Promise<
 
 // ─── Send via Resend API ──────────────────────────────────────────────────────
 
+export async function sendRawEmail(env: EmailEnv, to: string, subject: string, html: string): Promise<boolean> {
+  return sendEmail(env, to, subject, html)
+}
+
 async function sendEmail(env: EmailEnv, to: string, subject: string, html: string): Promise<boolean> {
   if (!env.RESEND_API_KEY) {
     console.warn('RESEND_API_KEY not set — skipping email')
@@ -108,7 +112,7 @@ export async function sendTestEmail(env: EmailEnv, to: string): Promise<boolean>
 
 // ─── Digest email template ────────────────────────────────────────────────────
 
-function buildDigestHtml(alerts: AlertPayload[]): string {
+export function buildDigestHtml(alerts: AlertPayload[]): string {
   const rows = alerts
     .map(
       (a) => `

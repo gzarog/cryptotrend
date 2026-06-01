@@ -9,6 +9,7 @@ export interface StoredSubscription {
     p256dh: string // base64url-encoded uncompressed EC public key (65 bytes)
     auth: string   // base64url-encoded 16-byte auth secret
   }
+  email?: string // CF Access email of the subscriber, if available at subscribe time
 }
 
 export interface Env {
@@ -16,6 +17,7 @@ export interface Env {
   ALERT_COOLDOWNS: KVNamespace
   EMAIL_SUBSCRIPTIONS: KVNamespace
   SIGNAL_CACHE: KVNamespace
+  NOTIFICATION_PREFERENCES: KVNamespace
   RESEND_API_KEY: string
   VAPID_PUBLIC_KEY: string
   VAPID_PRIVATE_KEY: string

@@ -13,7 +13,8 @@ import { sendPush } from './push'
 import { loadSubscriptions, removeSubscriptions, isInCooldown, setCooldown } from './kv'
 import { runSignalDetection, COOLDOWN_SECS } from './compute'
 import type { AlertPayload, SignalCachePayload } from './compute'
-import { sendEmailNotifications } from './email'
+import { loadSubscribers, buildDigestHtml, sendRawEmail } from './email'
+import { loadUserPreferences, shouldSendAlert, getDefaultCriteria } from './preferences'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT']
 
@@ -49,7 +50,7 @@ export async function handleScheduled(env: Env): Promise<void> {
   // Send push and email notifications in parallel
   await Promise.allSettled([
     handlePushNotifications(env, allAlerts),
-    sendEmailNotifications(env, allAlerts),
+    handleEmailNotifications(env, allAlerts),
   ])
 }
 
@@ -74,8 +75,8 @@ async function handlePushNotifications(env: Env, allAlerts: AlertPayload[]): Pro
   const subscriptions = await loadSubscriptions(env)
   if (!subscriptions.length) return
 
-  // Filter alerts that are still within their cooldown window
-  const freshAlerts = (
+  // Pre-filter: remove alerts still in global cooldown
+  const cooldownChecked = (
     await Promise.all(
       allAlerts.map(async (alert) => {
         const inCooldown = await isInCooldown(env, alert.tag)
@@ -84,25 +85,36 @@ async function handlePushNotifications(env: Env, allAlerts: AlertPayload[]): Pro
     )
   ).filter(Boolean) as AlertPayload[]
 
-  if (!freshAlerts.length) return
+  if (!cooldownChecked.length) return
 
   const expiredEndpoints: string[] = []
+  let totalSent = 0
 
   await Promise.allSettled(
     subscriptions.map(async (sub) => {
-      for (const alert of freshAlerts) {
+      // Apply per-user preference filtering if the subscription has an associated email
+      const prefs = sub.email
+        ? await loadUserPreferences(env, sub.email)
+        : getDefaultCriteria()
+
+      const filtered = cooldownChecked.filter((a) => shouldSendAlert(a.tag, prefs, 'push'))
+      if (!filtered.length) return
+
+      for (const alert of filtered) {
         const ok = await sendPush(sub, alert, env)
         if (!ok) {
           expiredEndpoints.push(sub.endpoint)
+          totalSent++
           break
         }
+        totalSent++
       }
     })
   )
 
-  // Set cooldowns for sent alerts (use per-tag TF if parseable, else 1h)
+  // Set global cooldowns for alerts that were dispatched
   await Promise.allSettled(
-    freshAlerts.map((alert) => {
+    cooldownChecked.map((alert) => {
       const tfMatch = alert.tag.match(/-(\w+)-(?:long|short|golden|death)$/)
       const tf = tfMatch?.[1] ?? '60'
       const ttl = COOLDOWN_SECS[tf] ?? 3600
@@ -115,5 +127,44 @@ async function handlePushNotifications(env: Env, allAlerts: AlertPayload[]): Pro
     console.log(`Removed ${expiredEndpoints.length} expired subscription(s)`)
   }
 
-  console.log(`Push cron: sent ${freshAlerts.length} alert(s) to ${subscriptions.length} subscriber(s)`)
+  console.log(`Push cron: dispatched ${totalSent} push(es) across ${subscriptions.length} subscriber(s)`)
+}
+
+async function handleEmailNotifications(env: Env, allAlerts: AlertPayload[]): Promise<void> {
+  const subscribers = await loadSubscribers(env)
+  if (!subscribers.length) return
+
+  await Promise.allSettled(
+    subscribers.map(async (email) => {
+      const prefs = await loadUserPreferences(env, email)
+
+      const freshAlerts = (
+        await Promise.all(
+          allAlerts.map(async (a) => {
+            if (!shouldSendAlert(a.tag, prefs, 'email')) return null
+            const key = `email:${email}:${a.tag}`
+            const inCooldown = (await env.ALERT_COOLDOWNS.get(key)) !== null
+            return inCooldown ? null : a
+          })
+        )
+      ).filter(Boolean) as AlertPayload[]
+
+      if (!freshAlerts.length) return
+
+      const subject =
+        freshAlerts.length === 1
+          ? freshAlerts[0].title
+          : `${freshAlerts.length} crypto signals detected`
+
+      const sent = await sendRawEmail(env, email, subject, buildDigestHtml(freshAlerts))
+      if (sent) {
+        await Promise.allSettled(
+          freshAlerts.map((a) =>
+            env.ALERT_COOLDOWNS.put(`email:${email}:${a.tag}`, '1', { expirationTtl: 3600 })
+          )
+        )
+        console.log(`Email sent to ${email} (${freshAlerts.length} alerts)`)
+      }
+    })
+  )
 }
