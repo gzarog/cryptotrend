@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { TIMEFRAMES, REFRESH_OPTIONS, SYMBOLS } from '../constants/market'
+import { WorkerHeartbeat } from './WorkerHeartbeat'
 
 interface ControlBarProps {
   symbol: string
@@ -104,6 +105,8 @@ export function ControlBar({
               Updated {lastUpdated}
             </span>
           )}
+
+          <WorkerHeartbeat />
         </div>
       </div>
     </div>
