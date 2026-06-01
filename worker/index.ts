@@ -197,6 +197,22 @@ export default {
       }
     }
 
+    // ── Signal cache ──────────────────────────────────────────────────────
+
+    if (request.method === 'GET' && url.pathname === '/api/signals/latest') {
+      const symbol = url.searchParams.get('symbol') ?? 'BTCUSDT'
+      const cached = await env.SIGNAL_CACHE.get(`latest:${symbol}`, 'json')
+      if (!cached) {
+        return json({ error: 'no data yet' }, 503)
+      }
+      return new Response(JSON.stringify(cached), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=60',
+        },
+      })
+    }
+
     return new Response('Not found', { status: 404 })
   },
 

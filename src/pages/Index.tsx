@@ -4,6 +4,7 @@ import { ControlBar } from '../components/ControlBar'
 import { DashboardView } from '../components/DashboardView'
 import { NotificationDialog } from '../components/NotificationDialog'
 import { useMarketData, useMultiFrameMarketData, useTickerData, useOpenInterestData, useCorrelationData } from '../hooks/useMarketData'
+import { useWorkerSignals } from '../hooks/useWorkerSignals'
 import {
   calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI,
   calculateMACD, calculateADX, calculateATR,
@@ -240,10 +241,13 @@ const Index = () => {
     symbol, timeframe, barLimit, refreshInterval, true
   )
 
-  // Multi-timeframe data for signals
+  // Multi-timeframe data — reduced to 5-min interval since worker is the primary signal poller
   const multiFrameResults = useMultiFrameMarketData(
-    symbol, MULTI_TF_LIST, Math.min(barLimit, 200), refreshInterval, true
+    symbol, MULTI_TF_LIST, Math.min(barLimit, 200), Math.max(refreshInterval, 5 * 60 * 1000), true
   )
+
+  // Worker pre-computed signals (refreshes every 60s, worker runs every 5 min)
+  const { data: workerSignals } = useWorkerSignals(symbol)
 
   // Ticker data (funding rate, etc.)
   const { data: tickerData } = useTickerData(symbol, refreshInterval, true)
