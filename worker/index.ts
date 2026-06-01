@@ -8,7 +8,8 @@
 import type { Env } from './push'
 import { addSubscription, removeSubscription } from './kv'
 import { handleScheduled } from './scheduler'
-import { isSubscribed, toggleSubscription, sendTestEmail } from './email'
+import { isSubscribed, toggleSubscription, sendTestEmail, loadSubscribers, removeSubscriber } from './email'
+import { loadSubscriptions } from './kv'
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -26,7 +27,7 @@ function getAuthEmail(request: Request, env: Env): string | null {
 function corsHeaders(): HeadersInit {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   }
 }
@@ -116,6 +117,83 @@ export default {
       } catch (err) {
         console.error('email toggle error:', err)
         return json({ error: 'Failed to toggle subscription' }, 500)
+      }
+    }
+
+    // ── Admin routes ─────────────────────────────────────────────────────
+
+    if (url.pathname.startsWith('/api/admin/')) {
+      const email = getAuthEmail(request, env)
+      if (!email) return json({ error: 'Not authenticated' }, 401)
+
+      // GET /api/admin/subscriptions
+      if (request.method === 'GET' && url.pathname === '/api/admin/subscriptions') {
+        try {
+          const subscriptions = await loadSubscriptions(env)
+          return json({ count: subscriptions.length, subscriptions })
+        } catch (err) {
+          console.error('admin subscriptions error:', err)
+          return json({ error: 'Failed to load subscriptions' }, 500)
+        }
+      }
+
+      // DELETE /api/admin/subscriptions
+      if (request.method === 'DELETE' && url.pathname === '/api/admin/subscriptions') {
+        try {
+          const body = await request.json() as { endpoint?: string }
+          if (!body?.endpoint) return json({ error: 'Missing endpoint' }, 400)
+          await removeSubscription(env, body.endpoint)
+          return json({ ok: true })
+        } catch (err) {
+          console.error('admin remove subscription error:', err)
+          return json({ error: 'Failed to remove subscription' }, 500)
+        }
+      }
+
+      // GET /api/admin/emails
+      if (request.method === 'GET' && url.pathname === '/api/admin/emails') {
+        try {
+          const emails = await loadSubscribers(env)
+          return json({ count: emails.length, emails })
+        } catch (err) {
+          console.error('admin emails error:', err)
+          return json({ error: 'Failed to load emails' }, 500)
+        }
+      }
+
+      // DELETE /api/admin/emails
+      if (request.method === 'DELETE' && url.pathname === '/api/admin/emails') {
+        try {
+          const body = await request.json() as { email?: string }
+          if (!body?.email) return json({ error: 'Missing email' }, 400)
+          await removeSubscriber(env, body.email)
+          return json({ ok: true })
+        } catch (err) {
+          console.error('admin remove email error:', err)
+          return json({ error: 'Failed to remove email' }, 500)
+        }
+      }
+
+      // GET /api/admin/cooldowns
+      if (request.method === 'GET' && url.pathname === '/api/admin/cooldowns') {
+        try {
+          const result = await env.ALERT_COOLDOWNS.list()
+          return json({ keys: result.keys.map((k) => ({ name: k.name, expiration: k.expiration })) })
+        } catch (err) {
+          console.error('admin cooldowns error:', err)
+          return json({ error: 'Failed to load cooldowns' }, 500)
+        }
+      }
+
+      // POST /api/admin/trigger-cron
+      if (request.method === 'POST' && url.pathname === '/api/admin/trigger-cron') {
+        try {
+          await handleScheduled(env)
+          return json({ ok: true, triggeredAt: Date.now() })
+        } catch (err) {
+          console.error('admin trigger-cron error:', err)
+          return json({ error: 'Failed to trigger cron' }, 500)
+        }
       }
     }
 

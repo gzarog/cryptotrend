@@ -17,7 +17,7 @@ const COOLDOWN_TTL = 3600
 
 // ─── Subscriber storage ───────────────────────────────────────────────────────
 
-async function loadSubscribers(env: EmailEnv): Promise<string[]> {
+export async function loadSubscribers(env: EmailEnv): Promise<string[]> {
   const raw = await env.EMAIL_SUBSCRIPTIONS.get(SUBSCRIBERS_KEY)
   if (!raw) return []
   try {
@@ -29,6 +29,11 @@ async function loadSubscribers(env: EmailEnv): Promise<string[]> {
 
 async function saveSubscribers(env: EmailEnv, emails: string[]): Promise<void> {
   await env.EMAIL_SUBSCRIPTIONS.put(SUBSCRIBERS_KEY, JSON.stringify(emails))
+}
+
+export async function removeSubscriber(env: EmailEnv, email: string): Promise<void> {
+  const subs = await loadSubscribers(env)
+  await saveSubscribers(env, subs.filter((e) => e !== email))
 }
 
 export async function isSubscribed(env: EmailEnv, email: string): Promise<boolean> {

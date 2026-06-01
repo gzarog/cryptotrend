@@ -173,6 +173,14 @@ export function MainLayout({
               )}
 
               <a
+                href="/admin"
+                className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
+                title="Admin panel"
+              >
+                Admin
+              </a>
+
+              <a
                 href="/cdn-cgi/access/logout"
                 className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
                 title="Sign out"
