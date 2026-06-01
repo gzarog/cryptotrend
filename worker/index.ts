@@ -11,6 +11,8 @@ import { handleScheduled } from './scheduler'
 import { isSubscribed, toggleSubscription, sendTestEmail, loadSubscribers, removeSubscriber } from './email'
 import { loadSubscriptions } from './kv'
 import type { SignalCachePayload } from './compute'
+import { loadUserPreferences, saveUserPreferences, getDefaultCriteria } from './preferences'
+import type { NotificationCriteria } from './types'
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -49,7 +51,8 @@ export default {
         if (!body?.endpoint || !body?.keys?.p256dh || !body?.keys?.auth) {
           return json({ error: 'Invalid subscription body' }, 400)
         }
-        await addSubscription(env, { endpoint: body.endpoint, keys: { p256dh: body.keys.p256dh, auth: body.keys.auth } })
+        const email = getAuthEmail(request, env) ?? undefined
+        await addSubscription(env, { endpoint: body.endpoint, keys: { p256dh: body.keys.p256dh, auth: body.keys.auth }, email })
         return json({ ok: true }, 201)
       } catch (err) {
         console.error('subscribe error:', err)
@@ -144,6 +147,49 @@ export default {
       } catch (err) {
         console.error('email toggle error:', err)
         return json({ error: 'Failed to toggle subscription' }, 500)
+      }
+    }
+
+    // ── Notification preferences ──────────────────────────────────────────────
+
+    if (url.pathname === '/api/notifications/preferences') {
+      const email = getAuthEmail(request, env)
+      if (!email) return json({ error: 'Not authenticated' }, 401)
+
+      if (request.method === 'GET') {
+        try {
+          const criteria = await loadUserPreferences(env, email)
+          return json({ email, criteria })
+        } catch (err) {
+          console.error('preferences get error:', err)
+          return json({ error: 'Failed to load preferences' }, 500)
+        }
+      }
+
+      if (request.method === 'POST') {
+        try {
+          const body = await request.json() as Partial<NotificationCriteria>
+          const current = await loadUserPreferences(env, email)
+          const updated: NotificationCriteria = { ...current, ...body }
+          await saveUserPreferences(env, email, updated)
+          return json({ email, criteria: updated })
+        } catch (err) {
+          console.error('preferences save error:', err)
+          return json({ error: 'Failed to save preferences' }, 500)
+        }
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/notifications/preferences/reset') {
+      const email = getAuthEmail(request, env)
+      if (!email) return json({ error: 'Not authenticated' }, 401)
+      try {
+        const defaults = getDefaultCriteria()
+        await saveUserPreferences(env, email, defaults)
+        return json({ email, criteria: defaults })
+      } catch (err) {
+        console.error('preferences reset error:', err)
+        return json({ error: 'Failed to reset preferences' }, 500)
       }
     }
 
