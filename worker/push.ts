@@ -15,6 +15,7 @@ export interface Env {
   PUSH_SUBSCRIPTIONS: KVNamespace
   ALERT_COOLDOWNS: KVNamespace
   EMAIL_SUBSCRIPTIONS: KVNamespace
+  SIGNAL_CACHE: KVNamespace
   RESEND_API_KEY: string
   VAPID_PUBLIC_KEY: string
   VAPID_PRIVATE_KEY: string

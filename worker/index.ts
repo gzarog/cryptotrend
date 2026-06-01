@@ -10,6 +10,7 @@ import { addSubscription, removeSubscription } from './kv'
 import { handleScheduled } from './scheduler'
 import { isSubscribed, toggleSubscription, sendTestEmail, loadSubscribers, removeSubscriber } from './email'
 import { loadSubscriptions } from './kv'
+import type { SignalCachePayload } from './compute'
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -70,6 +71,32 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/api/push/status') {
       return json({ ok: true, ts: Date.now() })
+    }
+
+    // ── Signals cache ─────────────────────────────────────────────────────────
+
+    // GET /api/signals/latest?symbol=BTCUSDT
+    if (request.method === 'GET' && url.pathname === '/api/signals/latest') {
+      const symbol = (url.searchParams.get('symbol') ?? 'BTCUSDT').toUpperCase()
+      try {
+        const cached = await env.SIGNAL_CACHE.get(`signals:${symbol}`, 'text')
+        if (!cached) {
+          return json({ error: 'No signal data yet — cron has not run or KV not configured' }, 503)
+        }
+        const payload = JSON.parse(cached) as SignalCachePayload
+        return new Response(cached, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=60',
+            'X-Computed-At': String(payload.computedAt),
+            ...corsHeaders(),
+          },
+        })
+      } catch (err) {
+        console.error('signals/latest error:', err)
+        return json({ error: 'Failed to read signal cache' }, 500)
+      }
     }
 
     // ── Auth ─────────────────────────────────────────────────────────────

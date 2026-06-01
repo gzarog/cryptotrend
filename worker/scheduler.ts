@@ -1,50 +1,91 @@
 /**
  * Cron handler — runs every 5 minutes (configured in wrangler.toml).
- * 1. Detect signals for configured symbols
- * 2. Filter out alerts still within their cooldown
- * 3. Send push to all subscribers
- * 4. Remove expired subscriptions (410 Gone from push endpoint)
+ * 1. Run full signal detection for each symbol (indicators + confluence)
+ * 2. Store computed signals in SIGNAL_CACHE KV (serves GET /api/signals/latest)
+ * 3. Filter out alerts still within cooldown
+ * 4. Send push notifications to all subscribers
+ * 5. Send email alerts to opted-in users
+ * 6. Remove expired push subscriptions (410 Gone from push endpoint)
  */
 
 import type { Env } from './push'
 import { sendPush } from './push'
 import { loadSubscriptions, removeSubscriptions, isInCooldown, setCooldown } from './kv'
-import { detectSignals, COOLDOWN_SECS } from './signals'
+import { runSignalDetection, COOLDOWN_SECS } from './compute'
+import type { AlertPayload, SignalCachePayload } from './compute'
 import { sendEmailNotifications } from './email'
 
-// Symbols to monitor (can be extended)
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT']
 
+// TTL for the signal cache entry: 10 minutes (2× the cron interval).
+// If the cron fails, the frontend gets a 503 and knows to fall back to local computation.
+const SIGNAL_CACHE_TTL_SECS = 600
+
 export async function handleScheduled(env: Env): Promise<void> {
-  // 1. Detect signals for all symbols concurrently
-  const allAlerts = (
-    await Promise.allSettled(SYMBOLS.map((sym) => detectSignals(sym)))
-  ).flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+  // Run full signal detection for all symbols concurrently
+  const results = await Promise.allSettled(SYMBOLS.map(sym => runSignalDetection(sym)))
+
+  const allAlerts: AlertPayload[] = []
+
+  for (let i = 0; i < SYMBOLS.length; i++) {
+    const result = results[i]
+    const symbol = SYMBOLS[i]
+
+    if (result.status === 'rejected') {
+      console.error(`Signal detection failed for ${symbol}:`, result.reason)
+      continue
+    }
+
+    const { payload, alerts } = result.value
+
+    // Store computed signals in KV so the frontend can read them
+    await storeSignalCache(env, symbol, payload)
+
+    allAlerts.push(...alerts)
+  }
 
   if (!allAlerts.length) return
 
-  // 2. Run push notifications and email notifications in parallel
+  // Send push and email notifications in parallel
   await Promise.allSettled([
     handlePushNotifications(env, allAlerts),
     sendEmailNotifications(env, allAlerts),
   ])
 }
 
-async function handlePushNotifications(env: Env, allAlerts: Awaited<ReturnType<typeof detectSignals>>): Promise<void> {
+async function storeSignalCache(env: Env, symbol: string, payload: SignalCachePayload): Promise<void> {
+  try {
+    // candles are large — strip them before caching (snapshots have all computed values)
+    const serialisable = {
+      ...payload,
+      snapshots: payload.snapshots.map(s => ({ ...s })),
+    }
+    await env.SIGNAL_CACHE.put(
+      `signals:${symbol}`,
+      JSON.stringify(serialisable),
+      { expirationTtl: SIGNAL_CACHE_TTL_SECS }
+    )
+  } catch (err) {
+    console.error(`Failed to store signal cache for ${symbol}:`, err)
+  }
+}
+
+async function handlePushNotifications(env: Env, allAlerts: AlertPayload[]): Promise<void> {
   const subscriptions = await loadSubscriptions(env)
   if (!subscriptions.length) return
 
-  // Filter by cooldown
-  const freshAlerts = await Promise.all(
-    allAlerts.map(async (alert) => {
-      const inCooldown = await isInCooldown(env, alert.tag)
-      return inCooldown ? null : alert
-    })
-  ).then((results) => results.filter(Boolean) as typeof allAlerts)
+  // Filter alerts that are still within their cooldown window
+  const freshAlerts = (
+    await Promise.all(
+      allAlerts.map(async (alert) => {
+        const inCooldown = await isInCooldown(env, alert.tag)
+        return inCooldown ? null : alert
+      })
+    )
+  ).filter(Boolean) as AlertPayload[]
 
   if (!freshAlerts.length) return
 
-  // Send pushes and track expired subscriptions
   const expiredEndpoints: string[] = []
 
   await Promise.allSettled(
@@ -53,21 +94,22 @@ async function handlePushNotifications(env: Env, allAlerts: Awaited<ReturnType<t
         const ok = await sendPush(sub, alert, env)
         if (!ok) {
           expiredEndpoints.push(sub.endpoint)
-          break // stop sending more alerts to a dead subscription
+          break
         }
       }
     })
   )
 
-  // Set cooldowns for sent alerts
+  // Set cooldowns for sent alerts (use per-tag TF if parseable, else 1h)
   await Promise.allSettled(
     freshAlerts.map((alert) => {
-      const ttl = COOLDOWN_SECS['60'] ?? 3600
+      const tfMatch = alert.tag.match(/-(\w+)-(?:long|short|golden|death)$/)
+      const tf = tfMatch?.[1] ?? '60'
+      const ttl = COOLDOWN_SECS[tf] ?? 3600
       return setCooldown(env, alert.tag, ttl)
     })
   )
 
-  // Remove expired subscriptions
   if (expiredEndpoints.length) {
     await removeSubscriptions(env, expiredEndpoints)
     console.log(`Removed ${expiredEndpoints.length} expired subscription(s)`)
