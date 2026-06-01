@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { NotificationPanel } from '../components/NotificationPanel'
+import { WorkerHeartbeat } from '../components/WorkerHeartbeat'
 import type { MomentumNotification, MovingAverageCrossNotification, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
 
 interface MainLayoutProps {
@@ -121,6 +122,8 @@ export function MainLayout({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <WorkerHeartbeat />
+
           {/* Signed-in user (Cloudflare Access) */}
           {userEmail && (
             <>
