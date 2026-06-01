@@ -4,6 +4,7 @@ import { ControlBar } from '../components/ControlBar'
 import { DashboardView } from '../components/DashboardView'
 import { NotificationDialog } from '../components/NotificationDialog'
 import { useMarketData, useMultiFrameMarketData, useTickerData, useOpenInterestData, useCorrelationData } from '../hooks/useMarketData'
+import { useWorkerSignals } from '../hooks/useWorkerSignals'
 import {
   calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI,
   calculateMACD, calculateADX, calculateATR,
@@ -235,14 +236,19 @@ const Index = () => {
 
   const refreshInterval = parseFloat(refreshSelection) * 60 * 1000
 
+  // Worker pre-computed signals (updates every time the 5-min cron fires)
+  const { data: workerSignals } = useWorkerSignals(symbol)
+
   // Primary timeframe data
   const { data: candles, isLoading, isError, error, isFetching, refetch } = useMarketData(
     symbol, timeframe, barLimit, refreshInterval, true
   )
 
-  // Multi-timeframe data for signals
+  // Multi-timeframe data — only needed for the interactive chart and local notification triggers.
+  // Poll at 5-min intervals matching the worker cron; signals panel uses worker-computed data.
+  const multiTfRefreshInterval = Math.max(refreshInterval, 5 * 60 * 1000)
   const multiFrameResults = useMultiFrameMarketData(
-    symbol, MULTI_TF_LIST, Math.min(barLimit, 200), refreshInterval, true
+    symbol, MULTI_TF_LIST, Math.min(barLimit, 200), multiTfRefreshInterval, true
   )
 
   // Ticker data (funding rate, etc.)
@@ -509,16 +515,22 @@ const Index = () => {
     return results
   }, [multiFrameResults])
 
-  const snapshots = useMemo<TimeframeSignalSnapshot[]>(
+  // Local snapshots — used for notification triggers and chart-interactive features.
+  const localSnapshots = useMemo<TimeframeSignalSnapshot[]>(
     () => deriveTimeframeSnapshots(computations, markovPriors, bayesianStateRef.current, fibResultsByTf),
     [computations, markovPriors, fibResultsByTf]
   )
 
+  // Prefer worker-computed snapshots for the signals panel when available and fresh (< 10 min).
+  const workerFresh = workerSignals && (Date.now() - workerSignals.computedAt < 10 * 60 * 1000)
+  const snapshots: TimeframeSignalSnapshot[] = workerFresh ? workerSignals.snapshots : localSnapshots
+
   const qualifiedSignals = useMemo(() => getQualifiedSignals(snapshots), [snapshots])
 
   const confluence = useMemo(
-    () => deriveMultiTimeframeConfluence(snapshots, bayesianStateRef.current),
-    [snapshots]
+    () => workerFresh ? workerSignals.confluence : deriveMultiTimeframeConfluence(localSnapshots, bayesianStateRef.current),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localSnapshots, workerSignals]
   )
 
   // ─── Multi-TF MA Cross Detection ─────────────────────────────────────────

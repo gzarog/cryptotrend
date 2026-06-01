@@ -27,6 +27,11 @@ id = "cfdb173091294911b9c9250f90c4c062"
 binding = "EMAIL_SUBSCRIPTIONS"
 id = "bb6e31167429490faa542b7c9ce980a5"
 
+[[kv_namespaces]]
+binding = "SIGNAL_CACHE"
+id = "5955f643efd5405185a0032d7d18385d"
+# Run: wrangler kv:namespace create SIGNAL_CACHE  then paste the id above
+
 # VAPID public key (safe to commit)
 [vars]
 VAPID_SUBJECT = "mailto:admin@cryptotrend.app"
