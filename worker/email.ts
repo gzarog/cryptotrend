@@ -3,7 +3,7 @@
  * Recipients are the logged-in Cloudflare Access users who toggled alerts on.
  */
 
-import type { AlertPayload } from './signals'
+import type { AlertPayload } from './types'
 
 export interface EmailEnv {
   EMAIL_SUBSCRIPTIONS: KVNamespace
