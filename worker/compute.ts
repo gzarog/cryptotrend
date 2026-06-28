@@ -5,26 +5,17 @@
  */
 
 import {
-  calculateRSI, calculateEMA, calculateSMA, calculateStochasticRSI,
-  calculateMACD, calculateADX, calculateATR,
-  calculateBollingerBands, calculateSupertrend, calculateOBV, calculateVWAP,
-  calculateVolatilityPercentile, calculateHurstExponent, calculateZScore,
-  calculateLinearRegression, calculateKAMA, calculateAutocorrelation, detectVolumeSpikes,
-  calculateIchimoku, calculateFibonacciLevels, calculateCVD,
+  calculateEMA, calculateFibonacciLevels,
 } from '../src/lib/indicators'
 import {
   deriveTimeframeSnapshots,
   deriveMultiTimeframeConfluence,
   calculateMultiTimeframeMarkovPriors,
-  getQualifiedSignals,
 } from '../src/lib/signals'
+import { buildMomentumComputations } from '../shared/compute'
 import type { Candle, MomentumComputation } from '../src/types/app'
 import type { TimeframeSignalSnapshot, MultiTimeframeConfluence } from '../src/types/signals'
 import {
-  RSI_SETTINGS, DEFAULT_RSI,
-  STOCH_SETTINGS, DEFAULT_STOCH,
-  MACD_SETTINGS, DEFAULT_MACD,
-  TF_LABELS,
   MONITORED_TIMEFRAMES,
   COOLDOWN_SECS,
 } from '../shared/config'
@@ -97,90 +88,15 @@ export async function fetchTicker(symbol: string): Promise<{ fundingRate: number
 
 // ─── Build MomentumComputation objects from raw candles ───────────────────────
 
+// Worker requires ≥55 bars per timeframe so longer-period indicators are valid.
+const WORKER_MIN_BARS = 55
+
 export function buildComputations(
   multiFrameCandles: { timeframe: string; candles: Candle[] }[],
   symbol: string,
   fundingRate: number | null = null
 ): MomentumComputation[] {
-  return multiFrameCandles
-    .filter(r => r.candles.length >= 55)
-    .map(r => {
-      const c = r.candles.map(x => x.close)
-      const tfRsiSetting  = RSI_SETTINGS[r.timeframe]  ?? DEFAULT_RSI
-      const tfStochSetting = STOCH_SETTINGS[r.timeframe] ?? DEFAULT_STOCH
-      const tfMacdSetting  = MACD_SETTINGS[r.timeframe]  ?? DEFAULT_MACD
-
-      const tfRsi   = calculateRSI(c, tfRsiSetting.period)
-      const tfStoch = calculateStochasticRSI(c, tfStochSetting.rsiLength, tfStochSetting.stochLength, tfStochSetting.kSmoothing, tfStochSetting.dSmoothing)
-      const tfMacd  = calculateMACD(c, tfMacdSetting.fast, tfMacdSetting.slow, tfMacdSetting.signal)
-      const tfEma10 = calculateEMA(c, 10)
-      const tfEma50 = calculateEMA(c, 50)
-      const tfSma200 = calculateSMA(c, 200)
-      const tfAdx   = calculateADX(r.candles, 14)
-      const tfAtr   = calculateATR(r.candles, 14)
-      const tfBB    = calculateBollingerBands(c, 20, 2)
-      const tfST    = calculateSupertrend(r.candles, 10, 3)
-      const tfOBV   = calculateOBV(r.candles)
-      const tfOBVEma = calculateEMA(tfOBV, 20)
-      const tfVWAP  = calculateVWAP(r.candles)
-      const tfVolPct = calculateVolatilityPercentile(tfAtr)
-
-      const tfHurst    = calculateHurstExponent(c)
-      const tfZScore   = calculateZScore(c)
-      const tfLinReg   = calculateLinearRegression(c)
-      const tfKAMA     = calculateKAMA(c)
-      const tfAutocorr = calculateAutocorrelation(c)
-      const tfVolSpikes = detectVolumeSpikes(r.candles)
-      const tfIchimoku = calculateIchimoku(r.candles)
-      const tfCVD      = calculateCVD(r.candles)
-      const len = r.candles.length
-
-      return {
-        symbol,
-        timeframe: r.timeframe,
-        timeframeLabel: TF_LABELS[r.timeframe] ?? r.timeframe,
-        rsi:         tfRsi[tfRsi.length - 1] ?? null,
-        stochK:      tfStoch.kValues[tfStoch.kValues.length - 1] ?? null,
-        stochD:      tfStoch.dValues[tfStoch.dValues.length - 1] ?? null,
-        macdLine:    tfMacd.macdLine[tfMacd.macdLine.length - 1] ?? null,
-        macdSignal:  tfMacd.signalLine[tfMacd.signalLine.length - 1] ?? null,
-        macdHistogram: tfMacd.histogram[tfMacd.histogram.length - 1] ?? null,
-        ema10:  tfEma10[tfEma10.length - 1] ?? null,
-        ema50:  tfEma50[tfEma50.length - 1] ?? null,
-        sma200: tfSma200[tfSma200.length - 1] ?? null,
-        adx:  tfAdx.adx[tfAdx.adx.length - 1] ?? null,
-        atr:  tfAtr[tfAtr.length - 1] ?? null,
-        close: c[c.length - 1] ?? null,
-        volume: r.candles[r.candles.length - 1]?.volume ?? null,
-        candles: r.candles,
-        bbUpper:    tfBB.upper[tfBB.upper.length - 1] ?? null,
-        bbLower:    tfBB.lower[tfBB.lower.length - 1] ?? null,
-        bbPercentB: tfBB.percentB[tfBB.percentB.length - 1] ?? null,
-        bbBandwidth: tfBB.bandwidth[tfBB.bandwidth.length - 1] ?? null,
-        supertrendValue:     tfST.supertrend[tfST.supertrend.length - 1] ?? null,
-        supertrendDirection: tfST.direction[tfST.direction.length - 1] ?? null,
-        obv:    tfOBV[tfOBV.length - 1] ?? null,
-        obvEma: tfOBVEma[tfOBVEma.length - 1] ?? null,
-        vwap:   tfVWAP[tfVWAP.length - 1] ?? null,
-        volatilityPercentile: tfVolPct,
-        fundingRate,
-        hurstExponent:       tfHurst,
-        zScore:              tfZScore[tfZScore.length - 1] ?? null,
-        rSquared:            tfLinReg.rSquared[tfLinReg.rSquared.length - 1] ?? null,
-        linearRegressionSlope: tfLinReg.slope[tfLinReg.slope.length - 1] ?? null,
-        kama:            tfKAMA[tfKAMA.length - 1] ?? null,
-        autocorrelation: tfAutocorr,
-        oiDivergence:    null,
-        volumeSpikeRatio: tfVolSpikes.length > 0 ? (tfVolSpikes[tfVolSpikes.length - 1]?.ratio ?? null) : null,
-        ichimokuTenkan:  tfIchimoku.tenkan[len - 1]  ?? null,
-        ichimokuKijun:   tfIchimoku.kijun[len - 1]   ?? null,
-        ichimokuSenkouA: tfIchimoku.senkouA[len - 1] ?? null,
-        ichimokuSenkouB: tfIchimoku.senkouB[len - 1] ?? null,
-        ichimokuChikou:  tfIchimoku.chikou[len - 1]  ?? null,
-        cvd:    tfCVD.cvd[tfCVD.cvd.length - 1]       ?? null,
-        cvdEma: tfCVD.cvdEma[tfCVD.cvdEma.length - 1] ?? null,
-      }
-    })
+  return buildMomentumComputations(multiFrameCandles, symbol, fundingRate, WORKER_MIN_BARS)
 }
 
 // ─── Alert generation from full signal objects ────────────────────────────────

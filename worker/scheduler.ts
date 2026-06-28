@@ -16,21 +16,81 @@ import type { AlertPayload, SignalCachePayload } from './compute'
 import { loadSubscribers, buildDigestHtml, sendRawEmail } from './email'
 import { loadUserPreferences, shouldSendAlert, getDefaultCriteria } from './preferences'
 
-const SYMBOLS = ['BTCUSDT', 'ETHUSDT']
+// Always monitored so the signal cache is populated for the default dashboard view,
+// even when no users have subscribed yet.
+const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT']
+
+// Bybit perpetual symbols are uppercase alphanumerics (e.g. BTCUSDT, 1000PEPEUSDT).
+const SYMBOL_RE = /^[A-Z0-9]{5,20}$/
+
+// Cap total symbols per run to stay within Bybit rate limits (each symbol fans
+// out into ~10 candle requests + a ticker request).
+const MAX_SYMBOLS = 25
+
+/**
+ * Merge default symbols with user-opted symbols, normalising case, dropping
+ * anything that doesn't look like a Bybit symbol, deduplicating, and capping
+ * the total. Pure so it can be unit-tested without KV. Defaults always win the
+ * first slots so the cache stays populated even when many users opt in.
+ */
+export function mergeMonitoredSymbols(
+  defaults: string[],
+  userSymbolLists: string[][],
+  max = MAX_SYMBOLS,
+): string[] {
+  const symbols = new Set<string>()
+  const add = (raw: string) => {
+    const norm = raw.trim().toUpperCase()
+    if (SYMBOL_RE.test(norm)) symbols.add(norm)
+  }
+  defaults.forEach(add)
+  for (const list of userSymbolLists) list.forEach(add)
+  return [...symbols].slice(0, max)
+}
+
+/**
+ * Resolve the set of symbols to run signal detection for: the defaults plus
+ * every symbol any subscribed user (push or email) has opted into via their
+ * notification preferences. Falls back to the defaults on any error.
+ */
+async function resolveMonitoredSymbols(env: Env): Promise<string[]> {
+  try {
+    const emails = new Set<string>()
+    for (const email of await loadSubscribers(env)) emails.add(email)
+    for (const sub of await loadSubscriptions(env)) {
+      if (sub.email) emails.add(sub.email)
+    }
+
+    const userSymbolLists = await Promise.all(
+      [...emails].map(async (email) => {
+        const prefs = await loadUserPreferences(env, email)
+        return prefs.symbols ?? []
+      })
+    )
+
+    return mergeMonitoredSymbols(DEFAULT_SYMBOLS, userSymbolLists)
+  } catch (err) {
+    console.error('Failed to resolve monitored symbols, using defaults:', err)
+    return [...DEFAULT_SYMBOLS]
+  }
+}
 
 // TTL for the signal cache entry: 10 minutes (2× the cron interval).
 // If the cron fails, the frontend gets a 503 and knows to fall back to local computation.
 const SIGNAL_CACHE_TTL_SECS = 600
 
 export async function handleScheduled(env: Env): Promise<void> {
+  // Determine which symbols to monitor from subscribers' preferences (+ defaults)
+  const symbols = await resolveMonitoredSymbols(env)
+
   // Run full signal detection for all symbols concurrently
-  const results = await Promise.allSettled(SYMBOLS.map(sym => runSignalDetection(sym)))
+  const results = await Promise.allSettled(symbols.map(sym => runSignalDetection(sym)))
 
   const allAlerts: AlertPayload[] = []
 
-  for (let i = 0; i < SYMBOLS.length; i++) {
+  for (let i = 0; i < symbols.length; i++) {
     const result = results[i]
-    const symbol = SYMBOLS[i]
+    const symbol = symbols[i]
 
     if (result.status === 'rejected') {
       console.error(`Signal detection failed for ${symbol}:`, result.reason)
