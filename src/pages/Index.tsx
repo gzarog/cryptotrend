@@ -24,56 +24,21 @@ import { createNotificationId, showBrowserNotification, getCooldown, playNotific
 import { calculateRiskLevels } from '../lib/risk'
 import { createInitialBayesianState, updateBayesianAccuracy } from '../lib/bayesian'
 import type { BayesianState } from '../lib/bayesian'
+import { buildMomentumComputations } from '../../shared/compute'
+import {
+  RSI_SETTINGS, DEFAULT_RSI,
+  STOCH_SETTINGS, DEFAULT_STOCH,
+  MACD_SETTINGS, DEFAULT_MACD,
+  ALL_SIGNAL_TIMEFRAMES,
+} from '../../shared/config'
 import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
 import type { TimeframeSignalSnapshot } from '../types/signals'
 
 // ─── Timeframe-Adaptive Settings ────────────────────────────────────────────
+// Indicator periods, labels, and the timeframe list are sourced from
+// shared/config.ts so the frontend and worker stay in lockstep.
 
-const RSI_SETTINGS: Record<string, { period: number; label: string }> = {
-  '5': { period: 8, label: '7–9' },
-  '15': { period: 11, label: '9–12' },
-  '30': { period: 13, label: '12–14' },
-  '60': { period: 15, label: '14–16' },
-  '120': { period: 17, label: '16–18' },
-  '240': { period: 20, label: '18–21' },
-  '360': { period: 23, label: '21–24' },
-  'D': { period: 14, label: '14' },
-  'W': { period: 14, label: '14' },
-}
-const DEFAULT_RSI = { period: 14, label: '14' }
-
-const STOCH_SETTINGS: Record<string, { rsiLength: number; stochLength: number; kSmoothing: number; dSmoothing: number }> = {
-  '5': { rsiLength: 7, stochLength: 7, kSmoothing: 2, dSmoothing: 2 },
-  '15': { rsiLength: 9, stochLength: 9, kSmoothing: 2, dSmoothing: 3 },
-  '30': { rsiLength: 12, stochLength: 12, kSmoothing: 3, dSmoothing: 3 },
-  '60': { rsiLength: 14, stochLength: 14, kSmoothing: 3, dSmoothing: 3 },
-  '120': { rsiLength: 16, stochLength: 16, kSmoothing: 3, dSmoothing: 3 },
-  '240': { rsiLength: 21, stochLength: 21, kSmoothing: 4, dSmoothing: 4 },
-  '360': { rsiLength: 24, stochLength: 24, kSmoothing: 4, dSmoothing: 4 },
-  'D': { rsiLength: 14, stochLength: 14, kSmoothing: 3, dSmoothing: 3 },
-  'W': { rsiLength: 14, stochLength: 14, kSmoothing: 3, dSmoothing: 3 },
-}
-const DEFAULT_STOCH = { rsiLength: 14, stochLength: 14, kSmoothing: 3, dSmoothing: 3 }
-
-const MACD_SETTINGS: Record<string, { fast: number; slow: number; signal: number }> = {
-  '5': { fast: 8, slow: 21, signal: 5 },
-  '15': { fast: 10, slow: 24, signal: 7 },
-  '30': { fast: 12, slow: 26, signal: 9 },
-  '60': { fast: 12, slow: 30, signal: 9 },
-  '120': { fast: 16, slow: 36, signal: 9 },
-  '240': { fast: 20, slow: 40, signal: 9 },
-  '360': { fast: 22, slow: 44, signal: 10 },
-  'D': { fast: 12, slow: 26, signal: 9 },
-  'W': { fast: 12, slow: 26, signal: 9 },
-}
-const DEFAULT_MACD = { fast: 12, slow: 26, signal: 9 }
-
-const MULTI_TF_LIST = ['5', '15', '30', '60', '120', '240', '360', 'D', 'W']
-
-const TF_LABELS: Record<string, string> = {
-  '5': '5m', '15': '15m', '30': '30m', '60': '1H',
-  '120': '2H', '240': '4H', '360': '6H', 'D': '1D', 'W': '1W',
-}
+const MULTI_TF_LIST = [...ALL_SIGNAL_TIMEFRAMES]
 
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -379,91 +344,12 @@ const Index = () => {
   // ─── Multi-Timeframe Computations ─────────────────────────────────────────
 
   const computations = useMemo<MomentumComputation[]>(() => {
-    return multiFrameResults
-      .filter(r => r.candles.length > 0)
-      .map(r => {
-        const c = r.candles.map(x => x.close)
-        const tfRsiSetting = RSI_SETTINGS[r.timeframe] ?? DEFAULT_RSI
-        const tfStochSetting = STOCH_SETTINGS[r.timeframe] ?? DEFAULT_STOCH
-        const tfMacdSetting = MACD_SETTINGS[r.timeframe] ?? DEFAULT_MACD
-
-        const tfRsi = calculateRSI(c, tfRsiSetting.period)
-        const tfStoch = calculateStochasticRSI(c, tfStochSetting.rsiLength, tfStochSetting.stochLength, tfStochSetting.kSmoothing, tfStochSetting.dSmoothing)
-        const tfMacd = calculateMACD(c, tfMacdSetting.fast, tfMacdSetting.slow, tfMacdSetting.signal)
-        const tfEma10 = calculateEMA(c, 10)
-        const tfEma50 = calculateEMA(c, 50)
-        const tfSma200 = calculateSMA(c, 200)
-        const tfAdx = calculateADX(r.candles, 14)
-        const tfAtr = calculateATR(r.candles, 14)
-        const tfBB = calculateBollingerBands(c, 20, 2)
-        const tfST = calculateSupertrend(r.candles, 10, 3)
-        const tfOBV = calculateOBV(r.candles)
-        const tfOBVEma = calculateEMA(tfOBV, 20)
-        const tfVWAP = calculateVWAP(r.candles)
-        const tfVolPct = calculateVolatilityPercentile(tfAtr)
-
-        // Advanced indicators per timeframe
-        const tfHurst = calculateHurstExponent(c)
-        const tfZScore = calculateZScore(c)
-        const tfLinReg = calculateLinearRegression(c)
-        const tfKAMA = calculateKAMA(c)
-        const tfAutocorr = calculateAutocorrelation(c)
-        const tfVolSpikes = detectVolumeSpikes(r.candles)
-
-        // Ichimoku + CVD per timeframe
-        const tfIchimoku = calculateIchimoku(r.candles)
-        const tfCVD = calculateCVD(r.candles)
-        const len = r.candles.length
-
-        return {
-          symbol,
-          timeframe: r.timeframe,
-          timeframeLabel: TF_LABELS[r.timeframe] ?? r.timeframe,
-          rsi: tfRsi[tfRsi.length - 1] ?? null,
-          stochK: tfStoch.kValues[tfStoch.kValues.length - 1] ?? null,
-          stochD: tfStoch.dValues[tfStoch.dValues.length - 1] ?? null,
-          macdLine: tfMacd.macdLine[tfMacd.macdLine.length - 1] ?? null,
-          macdSignal: tfMacd.signalLine[tfMacd.signalLine.length - 1] ?? null,
-          macdHistogram: tfMacd.histogram[tfMacd.histogram.length - 1] ?? null,
-          ema10: tfEma10[tfEma10.length - 1] ?? null,
-          ema50: tfEma50[tfEma50.length - 1] ?? null,
-          sma200: tfSma200[tfSma200.length - 1] ?? null,
-          adx: tfAdx.adx[tfAdx.adx.length - 1] ?? null,
-          atr: tfAtr[tfAtr.length - 1] ?? null,
-          close: c[c.length - 1] ?? null,
-          volume: r.candles[r.candles.length - 1]?.volume ?? null,
-          candles: r.candles,
-          bbUpper: tfBB.upper[tfBB.upper.length - 1] ?? null,
-          bbLower: tfBB.lower[tfBB.lower.length - 1] ?? null,
-          bbPercentB: tfBB.percentB[tfBB.percentB.length - 1] ?? null,
-          bbBandwidth: tfBB.bandwidth[tfBB.bandwidth.length - 1] ?? null,
-          supertrendValue: tfST.supertrend[tfST.supertrend.length - 1] ?? null,
-          supertrendDirection: tfST.direction[tfST.direction.length - 1] ?? null,
-          obv: tfOBV[tfOBV.length - 1] ?? null,
-          obvEma: tfOBVEma[tfOBVEma.length - 1] ?? null,
-          vwap: tfVWAP[tfVWAP.length - 1] ?? null,
-          volatilityPercentile: tfVolPct,
-          fundingRate: tickerData?.fundingRate ?? null,
-          // Advanced fields
-          hurstExponent: tfHurst,
-          zScore: tfZScore[tfZScore.length - 1] ?? null,
-          rSquared: tfLinReg.rSquared[tfLinReg.rSquared.length - 1] ?? null,
-          linearRegressionSlope: tfLinReg.slope[tfLinReg.slope.length - 1] ?? null,
-          kama: tfKAMA[tfKAMA.length - 1] ?? null,
-          autocorrelation: tfAutocorr,
-          oiDivergence: null, // OI divergence only available for primary TF
-          volumeSpikeRatio: tfVolSpikes.length > 0 ? tfVolSpikes[tfVolSpikes.length - 1]?.ratio ?? null : null,
-          // Ichimoku
-          ichimokuTenkan: tfIchimoku.tenkan[len - 1] ?? null,
-          ichimokuKijun: tfIchimoku.kijun[len - 1] ?? null,
-          ichimokuSenkouA: tfIchimoku.senkouA[len - 1] ?? null,
-          ichimokuSenkouB: tfIchimoku.senkouB[len - 1] ?? null,
-          ichimokuChikou: tfIchimoku.chikou[len - 1] ?? null,
-          // CVD
-          cvd: tfCVD.cvd[tfCVD.cvd.length - 1] ?? null,
-          cvdEma: tfCVD.cvdEma[tfCVD.cvdEma.length - 1] ?? null,
-        }
-      })
+    // Single source of truth (shared/compute.ts) — identical to the worker cron.
+    return buildMomentumComputations(
+      multiFrameResults.map(r => ({ timeframe: r.timeframe, candles: r.candles })),
+      symbol,
+      tickerData?.fundingRate ?? null,
+    )
   }, [multiFrameResults, symbol, tickerData])
 
   // ─── Bayesian Accuracy Updates ─────────────────────────────────────────────
