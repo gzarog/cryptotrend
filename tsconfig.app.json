@@ -27,5 +27,10 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/sw.ts",
+    "src/test/scheduler.test.ts",
+    "src/test/preferences.test.ts"
+  ]
 }

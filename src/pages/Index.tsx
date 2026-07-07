@@ -33,6 +33,7 @@ import {
 } from '../../shared/config'
 import type { MomentumNotification, MovingAverageCrossNotification, MomentumComputation, SignalNotification, DivergenceNotification, FundingRateNotification, RegimeChangeNotification, VolatilityBreakoutNotification, CorrelationBreakdownNotification } from '../types/app'
 import type { TimeframeSignalSnapshot } from '../types/signals'
+import { formatPrice, formatTimestamp, formatTimestampFull } from '../lib/format'
 
 // ─── Timeframe-Adaptive Settings ────────────────────────────────────────────
 // Indicator periods, labels, and the timeframe list are sourced from
@@ -40,13 +41,8 @@ import type { TimeframeSignalSnapshot } from '../types/signals'
 
 const MULTI_TF_LIST = [...ALL_SIGNAL_TIMEFRAMES]
 
-const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-})
-
-const LAST_REFRESH_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  hour: '2-digit', minute: '2-digit', second: '2-digit',
-})
+// Use format.ts helpers below — formatTimestamp / formatTimestampFull use
+// the user's UTC/local preference from localStorage automatically.
 
 // ─── MA Cross Detection ─────────────────────────────────────────────────────
 
@@ -117,23 +113,27 @@ function loadSetFromStorage(key: string): Set<string> {
   } catch { return new Set() }
 }
 
+function safeSetItem(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch { /* private mode or quota exceeded */ }
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 const Index = () => {
   const [symbol, setSymbol] = useState(() => localStorage.getItem('selected-symbol') || 'BTCUSDT')
   const handleSymbolChange = useCallback((s: string) => {
     setSymbol(s)
-    localStorage.setItem('selected-symbol', s)
+    safeSetItem('selected-symbol', s)
   }, [])
   const [timeframe, setTimeframe] = useState(() => localStorage.getItem('selected-timeframe') || '15')
   const handleTimeframeChange = useCallback((t: string) => {
     setTimeframe(t)
-    localStorage.setItem('selected-timeframe', t)
+    safeSetItem('selected-timeframe', t)
   }, [])
   const [refreshSelection, setRefreshSelection] = useState(() => localStorage.getItem('selected-refresh') || '1')
   const handleRefreshChange = useCallback((r: string) => {
     setRefreshSelection(r)
-    localStorage.setItem('selected-refresh', r)
+    safeSetItem('selected-refresh', r)
   }, [])
   const [barLimit, setBarLimit] = useState(400)
   const [showNotifDialog, setShowNotifDialog] = useState(false)
@@ -172,31 +172,31 @@ const Index = () => {
 
   // Persist notifications to localStorage
   useEffect(() => {
-    localStorage.setItem('momentum-notifications', JSON.stringify(momentumNotifications.slice(0, 50)))
+    safeSetItem('momentum-notifications', JSON.stringify(momentumNotifications.slice(0, 50)))
   }, [momentumNotifications])
   useEffect(() => {
-    localStorage.setItem('cross-notifications', JSON.stringify(crossNotifications.slice(0, 50)))
+    safeSetItem('cross-notifications', JSON.stringify(crossNotifications.slice(0, 50)))
   }, [crossNotifications])
   useEffect(() => {
-    localStorage.setItem('signal-notifications', JSON.stringify(signalNotifications.slice(0, 50)))
+    safeSetItem('signal-notifications', JSON.stringify(signalNotifications.slice(0, 50)))
   }, [signalNotifications])
   useEffect(() => {
-    localStorage.setItem('divergence-notifications', JSON.stringify(divergenceNotifications.slice(0, 50)))
+    safeSetItem('divergence-notifications', JSON.stringify(divergenceNotifications.slice(0, 50)))
   }, [divergenceNotifications])
   useEffect(() => {
-    localStorage.setItem('funding-notifications', JSON.stringify(fundingNotifications.slice(0, 50)))
+    safeSetItem('funding-notifications', JSON.stringify(fundingNotifications.slice(0, 50)))
   }, [fundingNotifications])
   useEffect(() => {
-    localStorage.setItem('regime-notifications', JSON.stringify(regimeNotifications.slice(0, 50)))
+    safeSetItem('regime-notifications', JSON.stringify(regimeNotifications.slice(0, 50)))
   }, [regimeNotifications])
   useEffect(() => {
-    localStorage.setItem('volatility-notifications', JSON.stringify(volatilityNotifications.slice(0, 50)))
+    safeSetItem('volatility-notifications', JSON.stringify(volatilityNotifications.slice(0, 50)))
   }, [volatilityNotifications])
   useEffect(() => {
-    localStorage.setItem('correlation-notifications', JSON.stringify(correlationNotifications.slice(0, 50)))
+    safeSetItem('correlation-notifications', JSON.stringify(correlationNotifications.slice(0, 50)))
   }, [correlationNotifications])
   useEffect(() => {
-    localStorage.setItem('read-notif-ids', JSON.stringify([...readNotifIds]))
+    safeSetItem('read-notif-ids', JSON.stringify([...readNotifIds]))
   }, [readNotifIds])
 
   const refreshInterval = parseFloat(refreshSelection) * 60 * 1000
@@ -227,11 +227,11 @@ const Index = () => {
 
   const lastUpdated = useMemo(() => {
     if (!candles?.length) return ''
-    return LAST_REFRESH_FORMATTER.format(new Date())
+    return formatTimestampFull(Date.now())
   }, [candles])
 
   const closes = useMemo(() => candles?.map(c => c.close) ?? [], [candles])
-  const labels = useMemo(() => candles?.map(c => DATE_FORMATTER.format(new Date(c.openTime))) ?? [], [candles])
+  const labels = useMemo(() => candles?.map(c => formatTimestamp(c.openTime)) ?? [], [candles])
 
   const latestCandle = candles?.[candles.length - 1] ?? null
   const firstCandle = candles?.[0] ?? null
@@ -352,32 +352,6 @@ const Index = () => {
     )
   }, [multiFrameResults, symbol, tickerData])
 
-  // ─── Bayesian Accuracy Updates ─────────────────────────────────────────────
-
-  useEffect(() => {
-    if (computations.length === 0) return
-
-    for (const comp of computations) {
-      if (!comp.candles.length || comp.candles.length < 10) continue
-      const len = comp.candles.length
-      // Use 5-bar forward return as the "actual" for accuracy tracking
-      if (len < 6) continue
-      const prevClose = comp.candles[len - 6].close
-      const currClose = comp.candles[len - 1].close
-      const actualReturn = currClose - prevClose
-
-      const snapshot = snapshots.find(s => s.timeframe === comp.timeframe)
-      if (snapshot) {
-        bayesianStateRef.current = updateBayesianAccuracy(
-          bayesianStateRef.current,
-          snapshot.signal.signals,
-          actualReturn,
-          len
-        )
-      }
-    }
-  }, [computations])
-
   // ─── Markov Priors ────────────────────────────────────────────────────────
 
   const markovPriors = useMemo(() => {
@@ -406,6 +380,33 @@ const Index = () => {
     () => deriveTimeframeSnapshots(computations, markovPriors, bayesianStateRef.current, fibResultsByTf),
     [computations, markovPriors, fibResultsByTf]
   )
+
+  // ─── Bayesian Accuracy Updates ─────────────────────────────────────────────
+  // Uses localSnapshots directly to avoid stale closure — localSnapshots is
+  // derived from the same computations batch, so accuracy is always current.
+
+  useEffect(() => {
+    if (computations.length === 0 || localSnapshots.length === 0) return
+
+    for (const comp of computations) {
+      if (!comp.candles.length || comp.candles.length < 10) continue
+      const len = comp.candles.length
+      if (len < 6) continue
+      const prevClose = comp.candles[len - 6].close
+      const currClose = comp.candles[len - 1].close
+      const actualReturn = currClose - prevClose
+
+      const snapshot = localSnapshots.find(s => s.timeframe === comp.timeframe)
+      if (snapshot) {
+        bayesianStateRef.current = updateBayesianAccuracy(
+          bayesianStateRef.current,
+          snapshot.signal.signals,
+          actualReturn,
+          len
+        )
+      }
+    }
+  }, [computations, localSnapshots])
 
   // Prefer worker-computed snapshots for the signals panel when available and fresh (< 10 min).
   const workerFresh = workerSignals && (Date.now() - workerSignals.computedAt < 10 * 60 * 1000)
@@ -447,7 +448,7 @@ const Index = () => {
         setCrossNotifications(prev => [notif, ...prev].slice(0, 50))
         showBrowserNotification(
           `${cross.direction === 'golden' ? '🟡 Golden' : '🟣 Death'} Cross — ${symbol} (${comp.timeframeLabel})`,
-          `EMA 10/50 ${cross.direction} cross at $${comp.close.toLocaleString()}`
+          `EMA 10/50 ${cross.direction} cross at ${formatPrice(comp.close)}`
         )
         playNotificationSound(priority)
       }

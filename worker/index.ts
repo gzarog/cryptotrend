@@ -21,26 +21,85 @@ function json(data: unknown, status = 200): Response {
   })
 }
 
-function getAuthEmail(request: Request, env: Env): string | null {
-  return request.headers.get('Cf-Access-Authenticated-User-Email')
-    ?? env.DEV_USER_EMAIL
-    ?? null
+/**
+ * Verify a Cloudflare Access JWT when ACCESS_AUD + ACCESS_TEAM_DOMAIN are configured.
+ * Falls back to trusting the plain header only in local dev (DEV_USER_EMAIL set, no aud).
+ *
+ * Returns the authenticated email or null.
+ */
+async function getAuthEmail(request: Request, env: Env): Promise<string | null> {
+  // Local dev shortcut (no CF Access configured)
+  if (!env.ACCESS_AUD && env.DEV_USER_EMAIL) {
+    return env.DEV_USER_EMAIL
+  }
+
+  // If ACCESS_AUD is set, verify the CF Access JWT assertion
+  if (env.ACCESS_AUD && env.ACCESS_TEAM_DOMAIN) {
+    const token = request.headers.get('Cf-Access-Jwt-Assertion')
+    if (!token) return null
+    try {
+      const certsUrl = `https://${env.ACCESS_TEAM_DOMAIN}.cloudflareaccess.com/cdn-cgi/access/certs`
+      const certsRes = await fetch(certsUrl)
+      if (!certsRes.ok) throw new Error(`Failed to fetch CF Access certs: ${certsRes.status}`)
+      const certs = await certsRes.json() as { keys: JsonWebKey[] }
+
+      const [headerB64, payloadB64, sigB64] = token.split('.')
+      if (!headerB64 || !payloadB64 || !sigB64) return null
+
+      const header = JSON.parse(atob(headerB64.replace(/-/g, '+').replace(/_/g, '/'))) as { kid?: string; alg?: string }
+      const jwk = certs.keys.find((k: JsonWebKey & { kid?: string }) => k.kid === header.kid) ?? certs.keys[0]
+      if (!jwk) return null
+
+      const key = await crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+        false,
+        ['verify']
+      )
+      const signingInput = new TextEncoder().encode(`${headerB64}.${payloadB64}`)
+      const sigBytes = Uint8Array.from(atob(sigB64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))
+      const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sigBytes, signingInput)
+      if (!valid) return null
+
+      const payload = JSON.parse(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'))) as { email?: string; aud?: string | string[]; exp?: number }
+      const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud ?? '']
+      if (!aud.includes(env.ACCESS_AUD)) return null
+      if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
+
+      return payload.email ?? null
+    } catch (err) {
+      console.error('CF Access JWT verification failed:', err)
+      return null
+    }
+  }
+
+  // Fallback: trust the plain header only when no aud is configured (permissive dev mode)
+  return request.headers.get('Cf-Access-Authenticated-User-Email') ?? null
 }
 
-function corsHeaders(): HeadersInit {
+function isAdmin(email: string, env: Env): boolean {
+  if (!env.ADMIN_EMAILS) return false
+  return env.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase()).includes(email.toLowerCase())
+}
+
+function corsHeaders(request: Request, env: Env): HeadersInit {
+  const allowedOrigin = env.ALLOWED_ORIGIN ?? request.headers.get('Origin') ?? ''
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Cf-Access-Jwt-Assertion',
+    'Vary': 'Origin',
   }
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
+    const cors = corsHeaders(request, env)
 
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders() })
+      return new Response(null, { status: 204, headers: cors })
     }
 
     // ── Push notification routes ─────────────────────────────────────────
@@ -51,7 +110,7 @@ export default {
         if (!body?.endpoint || !body?.keys?.p256dh || !body?.keys?.auth) {
           return json({ error: 'Invalid subscription body' }, 400)
         }
-        const email = getAuthEmail(request, env) ?? undefined
+        const email = (await getAuthEmail(request, env)) ?? undefined
         await addSubscription(env, { endpoint: body.endpoint, keys: { p256dh: body.keys.p256dh, auth: body.keys.auth }, email })
         return json({ ok: true }, 201)
       } catch (err) {
@@ -93,7 +152,7 @@ export default {
             'Content-Type': 'application/json',
             'Cache-Control': 'public, max-age=60',
             'X-Computed-At': String(payload.computedAt),
-            ...corsHeaders(),
+            ...cors,
           },
         })
       } catch (err) {
@@ -105,7 +164,7 @@ export default {
     // ── Auth ─────────────────────────────────────────────────────────────
 
     if (request.method === 'GET' && url.pathname === '/api/me') {
-      const email = getAuthEmail(request, env)
+      const email = await getAuthEmail(request, env)
       return json({ email: email ?? null })
     }
 
@@ -113,7 +172,7 @@ export default {
 
     // GET /api/email/status — is the current user subscribed?
     if (request.method === 'GET' && url.pathname === '/api/email/status') {
-      const email = getAuthEmail(request, env)
+      const email = await getAuthEmail(request, env)
       if (!email) return json({ subscribed: false, email: null })
       try {
         const subscribed = await isSubscribed(env, email)
@@ -126,7 +185,7 @@ export default {
 
     // POST /api/email/test — send a test email to the current CF Access user
     if (request.method === 'POST' && url.pathname === '/api/email/test') {
-      const email = getAuthEmail(request, env)
+      const email = await getAuthEmail(request, env)
       if (!email) return json({ error: 'Not authenticated via Cloudflare Access' }, 401)
       try {
         const ok = await sendTestEmail(env, email)
@@ -139,7 +198,7 @@ export default {
 
     // POST /api/email/toggle — flip subscription state for current user
     if (request.method === 'POST' && url.pathname === '/api/email/toggle') {
-      const email = getAuthEmail(request, env)
+      const email = await getAuthEmail(request, env)
       if (!email) return json({ error: 'Not authenticated via Cloudflare Access' }, 401)
       try {
         const nowEnabled = await toggleSubscription(env, email)
@@ -153,7 +212,7 @@ export default {
     // ── Notification preferences ──────────────────────────────────────────────
 
     if (url.pathname === '/api/notifications/preferences') {
-      const email = getAuthEmail(request, env)
+      const email = await getAuthEmail(request, env)
       if (!email) return json({ error: 'Not authenticated' }, 401)
 
       if (request.method === 'GET') {
@@ -181,7 +240,7 @@ export default {
     }
 
     if (request.method === 'POST' && url.pathname === '/api/notifications/preferences/reset') {
-      const email = getAuthEmail(request, env)
+      const email = await getAuthEmail(request, env)
       if (!email) return json({ error: 'Not authenticated' }, 401)
       try {
         const defaults = getDefaultCriteria()
@@ -194,10 +253,12 @@ export default {
     }
 
     // ── Admin routes ─────────────────────────────────────────────────────
+    // Requires authenticated email AND presence in the ADMIN_EMAILS env var.
 
     if (url.pathname.startsWith('/api/admin/')) {
-      const email = getAuthEmail(request, env)
+      const email = await getAuthEmail(request, env)
       if (!email) return json({ error: 'Not authenticated' }, 401)
+      if (!isAdmin(email, env)) return json({ error: 'Forbidden' }, 403)
 
       // GET /api/admin/subscriptions
       if (request.method === 'GET' && url.pathname === '/api/admin/subscriptions') {

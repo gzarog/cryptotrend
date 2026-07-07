@@ -1,1 +1,0 @@
-This folder contains the built output assets for the worker "cryptotrend" generated at 2026-06-01T06:09:46.604Z.

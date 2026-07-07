@@ -42,9 +42,17 @@ id = "f8440d2775394f5ba7a4ffb757d36205"
 VAPID_SUBJECT = "mailto:admin@cryptotrend.app"
 VAPID_PUBLIC_KEY = "BMFQ4IxTfLtsjs5eZZkHg74cfXJgpmqVLiDhpQtiaFD73JEZEhDCo-jhNavMBpN3e3OBLkk6gXOoGbETN-hZu0U"
 
-# Secrets — set in Cloudflare dashboard → Workers & Pages → cryptotrend → Settings → Variables
-# VAPID_PRIVATE_KEY = "..."   (Web Push signing key)
-RESEND_API_KEY = "re_EtVmd1Sp_NGQFQRzcKajRGVFcBxQnRimF"
+# Secrets — set via: wrangler secret put <NAME>
+# Never commit secret values here.
+#   wrangler secret put VAPID_PRIVATE_KEY
+#   wrangler secret put RESEND_API_KEY
+#
+# Optional env vars (safe to set here or in Cloudflare dashboard):
+#   ALLOWED_ORIGIN = "https://your-domain.com"   # restrict CORS; defaults to same-origin
+#   ADMIN_EMAILS   = "you@example.com,other@example.com"  # comma-separated admin allowlist
+#   ACCESS_AUD     = "<CF Access application audience tag>"  # enables JWT verification
+#   ACCESS_TEAM_DOMAIN = "yourteam"  # your Cloudflare Access team name
+#   FROM_ADDRESS   = "CryptoTrendNotify <alerts@yourdomain.com>"  # verified Resend sender
 
 # Cron: run signal detection + push delivery every 5 minutes
 [triggers]

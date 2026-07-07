@@ -675,13 +675,14 @@ export function deriveCombinedSignal(
   comp: MomentumComputation,
   markovPrior: number = 0,
   bayesianState?: BayesianState,
-  fibResult?: FibonacciResult | null
+  fibResult?: FibonacciResult | null,
+  precomputedTrendBias?: TrendBias
 ): CombinedSignal {
   const rsiSignal = deriveRSISignal(comp.rsi)
   const stochSignal = deriveStochSignal(comp.stochK, comp.stochD)
   const macdSignal = deriveMACDSignal(comp.macdLine, comp.macdSignal, comp.macdHistogram)
 
-  const trendBias = deriveTrendBias(comp)
+  const trendBias = precomputedTrendBias ?? deriveTrendBias(comp)
   const trendDirection = trendBias.direction
 
   const adxSignal = deriveADXSignal(comp.adx, trendDirection)
@@ -754,8 +755,8 @@ export function deriveTimeframeSnapshots(
   return computations.map((comp) => {
     const prior = markovPriors[comp.timeframe] ?? 0
     const fibResult = fibResults?.[comp.timeframe] ?? null
-    const signal = deriveCombinedSignal(comp, prior, bayesianState, fibResult)
     const trendBias = deriveTrendBias(comp)
+    const signal = deriveCombinedSignal(comp, prior, bayesianState, fibResult, trendBias)
 
     return {
       timeframe: comp.timeframe,
@@ -966,10 +967,6 @@ function calculateAdaptiveTFWeights(snapshots: TimeframeSignalSnapshot[]): Recor
 
 // ─── Multi-Timeframe Confluence ─────────────────────────────────────────────
 
-const TF_WEIGHTS: Record<string, number> = {
-  '5': 1, '15': 1.5, '30': 2, '60': 3, '120': 4, '240': 5, '360': 6, 'D': 7, 'W': 8,
-}
-
 export function deriveMultiTimeframeConfluence(
   snapshots: TimeframeSignalSnapshot[],
   bayesianState?: BayesianState
@@ -983,7 +980,7 @@ export function deriveMultiTimeframeConfluence(
   let neutralCount = 0
 
   for (const snap of snapshots) {
-    let weight = adaptiveWeights[snap.timeframe] ?? TF_WEIGHTS[snap.timeframe] ?? 1
+    let weight = adaptiveWeights[snap.timeframe] ?? BASE_TF_WEIGHTS[snap.timeframe] ?? 1
 
     // Hurst boost: trending markets get higher TF weight boost
     if (snap.hurstExponent !== null) {
