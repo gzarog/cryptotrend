@@ -23,6 +23,15 @@ export interface Env {
   VAPID_PRIVATE_KEY: string
   VAPID_SUBJECT: string
   DEV_USER_EMAIL?: string  // local dev only — falls back when CF Access header is absent
+  // Security
+  ALLOWED_ORIGIN?: string       // restrict CORS; defaults to same-origin
+  ADMIN_EMAILS?: string         // comma-separated admin allowlist
+  ACCESS_AUD?: string           // CF Access audience tag — enables JWT verification when set
+  ACCESS_TEAM_DOMAIN?: string   // CF Access team name (for cert fetching)
+  // Email
+  FROM_ADDRESS?: string         // verified Resend sender address
+  // Data source
+  BYBIT_API_HOST?: string       // override Bybit hostname (e.g. for proxy / geo-block bypass)
 }
 
 // ─── Base64url helpers ───────────────────────────────────────────────────────

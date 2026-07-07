@@ -52,11 +52,21 @@ function getTagParts(tag: string): { symbol: string | null; timeframe: string | 
   const parts = tag.split('-')
   const type = parts[0]
   if (type === 'funding') {
-    // funding-SYMBOL
+    // funding-SYMBOL (no timeframe)
     return { symbol: parts[1] ?? null, timeframe: null }
   }
   // most tags: TYPE-SYMBOL-TF-...
   return { symbol: parts[1] ?? null, timeframe: parts[2] ?? null }
+}
+
+/**
+ * Extract the timeframe component from an alert tag string.
+ * Returns '60' as default (→ 1h cooldown) when no timeframe is present (e.g. funding alerts).
+ * Works for all tag formats: momentum-BTCUSDT-60-long, macross-ETHUSDT-240-golden, funding-BTCUSDT
+ */
+export function extractTimeframeFromTag(tag: string): string {
+  const { timeframe } = getTagParts(tag)
+  return timeframe ?? '60'
 }
 
 /** Returns true if `channel` should receive this alert given the user's criteria. */

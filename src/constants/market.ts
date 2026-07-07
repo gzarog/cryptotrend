@@ -28,6 +28,6 @@ export const SYMBOLS = [
   'ADAUSDT',
   'AVAXUSDT',
   'DOTUSDT',
-  'MATICUSDT',
+  'POLUSDT',  // formerly MATICUSDT — Polygon migrated MATIC→POL
   'LINKUSDT',
 ] as const

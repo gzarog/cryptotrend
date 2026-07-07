@@ -40,16 +40,35 @@ export type SignalCachePayload = {
 // ─── Bybit data fetching ──────────────────────────────────────────────────────
 
 const BYBIT_LIMIT = 200
+const FETCH_TIMEOUT_MS = 8_000
 
-export async function fetchCandles(symbol: string, interval: string, limit = BYBIT_LIMIT): Promise<Candle[]> {
-  const url = new URL('https://api.bybit.com/v5/market/kline')
+function bybitHost(env?: { BYBIT_API_HOST?: string }): string {
+  return env?.BYBIT_API_HOST ?? 'api.bybit.com'
+}
+
+function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), timeout)
+  return fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: controller.signal,
+  }).finally(() => clearTimeout(id))
+}
+
+export async function fetchCandles(symbol: string, interval: string, limit = BYBIT_LIMIT, env?: { BYBIT_API_HOST?: string }): Promise<Candle[]> {
+  const url = new URL(`https://${bybitHost(env)}/v5/market/kline`)
   url.searchParams.set('category', 'linear')
   url.searchParams.set('symbol', symbol)
   url.searchParams.set('interval', interval)
   url.searchParams.set('limit', String(Math.min(limit, BYBIT_LIMIT)))
 
-  const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } })
-  if (!res.ok) throw new Error(`Bybit OHLCV fetch failed: ${res.status}`)
+  const res = await fetchWithTimeout(url.toString())
+  if (!res.ok) {
+    if (res.status === 403 || res.status === 451) {
+      throw new Error(`Bybit geo-block: HTTP ${res.status} for ${symbol}/${interval} — configure BYBIT_API_HOST to route around this`)
+    }
+    throw new Error(`Bybit OHLCV fetch failed: ${res.status}`)
+  }
 
   const json = await res.json() as { retCode: number; retMsg: string; result?: { list?: string[][] } }
   if (json.retCode !== 0 || !json.result?.list) throw new Error(json.retMsg ?? 'Bybit error')
@@ -63,17 +82,19 @@ export async function fetchCandles(symbol: string, interval: string, limit = BYB
       close: Number(e[4]),
       volume: Number(e[5]),
       turnover: Number(e[6] ?? 0),
-      closeTime: Number(e[0]) + 1,
+      // Bybit kline timestamps are in milliseconds; closeTime is not in the API response,
+      // so we leave it as 0 — callers should rely on openTime only.
+      closeTime: 0,
     }))
     .sort((a, b) => a.openTime - b.openTime)
 }
 
-export async function fetchTicker(symbol: string): Promise<{ fundingRate: number; markPrice: number }> {
-  const url = new URL('https://api.bybit.com/v5/market/tickers')
+export async function fetchTicker(symbol: string, env?: { BYBIT_API_HOST?: string }): Promise<{ fundingRate: number; markPrice: number }> {
+  const url = new URL(`https://${bybitHost(env)}/v5/market/tickers`)
   url.searchParams.set('category', 'linear')
   url.searchParams.set('symbol', symbol)
 
-  const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } })
+  const res = await fetchWithTimeout(url.toString())
   if (!res.ok) throw new Error(`Bybit ticker fetch failed: ${res.status}`)
 
   const json = await res.json() as { retCode: number; retMsg: string; result?: { list?: Record<string, string>[] } }
@@ -164,7 +185,7 @@ export function generateAlertsFromComputations(
     if (cross) {
       alerts.push({
         title: `${cross === 'golden' ? '🟡 Golden' : '🟣 Death'} Cross — ${symbol} (${tfLabel})`,
-        body: `EMA 10/50 ${cross} cross at $${comp.close.toLocaleString()}`,
+        body: `EMA 10/50 ${cross} cross at $${comp.close.toFixed(2)}`,
         tag: `macross-${symbol}-${tf}-${cross}`,
         url: '/',
       })
@@ -198,15 +219,15 @@ export function generateAlertsFromComputations(
 
 // ─── Main: run full signal detection for one symbol ───────────────────────────
 
-export async function runSignalDetection(symbol: string): Promise<{
+export async function runSignalDetection(symbol: string, env?: { BYBIT_API_HOST?: string }): Promise<{
   payload: SignalCachePayload
   alerts: AlertPayload[]
 }> {
   // Parallel fetch: ticker + all timeframes
   const timeframes = [...(new Set([...MONITORED_TIMEFRAMES, '5', '15', '30']))]
   const [tickerResult, ...candleResults] = await Promise.allSettled([
-    fetchTicker(symbol),
-    ...timeframes.map(tf => fetchCandles(symbol, tf, BYBIT_LIMIT)),
+    fetchTicker(symbol, env),
+    ...timeframes.map(tf => fetchCandles(symbol, tf, BYBIT_LIMIT, env)),
   ])
 
   const fundingRate = tickerResult.status === 'fulfilled' ? tickerResult.value.fundingRate : null

@@ -14,7 +14,7 @@ import { loadSubscriptions, removeSubscriptions, isInCooldown, setCooldown } fro
 import { runSignalDetection, COOLDOWN_SECS } from './compute'
 import type { AlertPayload, SignalCachePayload } from './compute'
 import { loadSubscribers, buildDigestHtml, sendRawEmail } from './email'
-import { loadUserPreferences, shouldSendAlert, getDefaultCriteria } from './preferences'
+import { loadUserPreferences, shouldSendAlert, getDefaultCriteria, extractTimeframeFromTag } from './preferences'
 
 // Always monitored so the signal cache is populated for the default dashboard view,
 // even when no users have subscribed yet.
@@ -84,7 +84,7 @@ export async function handleScheduled(env: Env): Promise<void> {
   const symbols = await resolveMonitoredSymbols(env)
 
   // Run full signal detection for all symbols concurrently
-  const results = await Promise.allSettled(symbols.map(sym => runSignalDetection(sym)))
+  const results = await Promise.allSettled(symbols.map(sym => runSignalDetection(sym, env)))
 
   const allAlerts: AlertPayload[] = []
 
@@ -116,14 +116,9 @@ export async function handleScheduled(env: Env): Promise<void> {
 
 async function storeSignalCache(env: Env, symbol: string, payload: SignalCachePayload): Promise<void> {
   try {
-    // candles are large — strip them before caching (snapshots have all computed values)
-    const serialisable = {
-      ...payload,
-      snapshots: payload.snapshots.map(s => ({ ...s })),
-    }
     await env.SIGNAL_CACHE.put(
       `signals:${symbol}`,
-      JSON.stringify(serialisable),
+      JSON.stringify(payload),
       { expirationTtl: SIGNAL_CACHE_TTL_SECS }
     )
   } catch (err) {
@@ -149,6 +144,7 @@ async function handlePushNotifications(env: Env, allAlerts: AlertPayload[]): Pro
 
   const expiredEndpoints: string[] = []
   let totalSent = 0
+  const successfullySentTags = new Set<string>()
 
   await Promise.allSettled(
     subscriptions.map(async (sub) => {
@@ -160,25 +156,27 @@ async function handlePushNotifications(env: Env, allAlerts: AlertPayload[]): Pro
       const filtered = cooldownChecked.filter((a) => shouldSendAlert(a.tag, prefs, 'push'))
       if (!filtered.length) return
 
+      let subExpired = false
       for (const alert of filtered) {
+        if (subExpired) break
         const ok = await sendPush(sub, alert, env)
         if (!ok) {
           expiredEndpoints.push(sub.endpoint)
+          subExpired = true
+        } else {
+          successfullySentTags.add(alert.tag)
           totalSent++
-          break
         }
-        totalSent++
       }
     })
   )
 
-  // Set global cooldowns for alerts that were dispatched
+  // Only set global cooldowns for alerts that were actually delivered to at least one subscriber
   await Promise.allSettled(
-    cooldownChecked.map((alert) => {
-      const tfMatch = alert.tag.match(/-(\w+)-(?:long|short|golden|death)$/)
-      const tf = tfMatch?.[1] ?? '60'
+    [...successfullySentTags].map((tag) => {
+      const tf = extractTimeframeFromTag(tag)
       const ttl = COOLDOWN_SECS[tf] ?? 3600
-      return setCooldown(env, alert.tag, ttl)
+      return setCooldown(env, tag, ttl)
     })
   )
 

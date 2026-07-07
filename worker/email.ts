@@ -3,16 +3,17 @@
  * Recipients are the logged-in Cloudflare Access users who toggled alerts on.
  */
 
-import type { AlertPayload } from './signals'
+import type { AlertPayload } from './compute'
 
 export interface EmailEnv {
   EMAIL_SUBSCRIPTIONS: KVNamespace
   ALERT_COOLDOWNS: KVNamespace
   RESEND_API_KEY: string
+  FROM_ADDRESS?: string
 }
 
 const SUBSCRIBERS_KEY = 'subscribers'
-const FROM_ADDRESS = 'CryptoTrendNotify <onboarding@resend.dev>'
+const DEFAULT_FROM_ADDRESS = 'CryptoTrendNotify <onboarding@resend.dev>'
 const COOLDOWN_TTL = 3600
 
 // ─── Subscriber storage ───────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ async function sendEmail(env: EmailEnv, to: string, subject: string, html: strin
     console.warn('RESEND_API_KEY not set — skipping email')
     return false
   }
+  const from = env.FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -72,7 +74,7 @@ async function sendEmail(env: EmailEnv, to: string, subject: string, html: strin
         Authorization: `Bearer ${env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from: FROM_ADDRESS, to, subject, html }),
+      body: JSON.stringify({ from, to, subject, html }),
     })
     if (!res.ok) {
       console.error(`Resend error ${res.status}:`, await res.text())
@@ -151,47 +153,3 @@ export function buildDigestHtml(alerts: AlertPayload[]): string {
 </html>`
 }
 
-// ─── Main: called from cron scheduler ────────────────────────────────────────
-
-export async function sendEmailNotifications(
-  env: EmailEnv,
-  alerts: AlertPayload[]
-): Promise<void> {
-  if (!alerts.length) return
-
-  const subscribers = await loadSubscribers(env)
-  if (!subscribers.length) return
-
-  await Promise.allSettled(
-    subscribers.map(async (email) => {
-      const freshAlerts = (
-        await Promise.all(
-          alerts.map(async (a) => {
-            const key = `email:${email}:${a.tag}`
-            const inCooldown = (await env.ALERT_COOLDOWNS.get(key)) !== null
-            return inCooldown ? null : a
-          })
-        )
-      ).filter(Boolean) as AlertPayload[]
-
-      if (!freshAlerts.length) return
-
-      const subject =
-        freshAlerts.length === 1
-          ? freshAlerts[0].title
-          : `${freshAlerts.length} crypto signals detected`
-
-      const sent = await sendEmail(env, email, subject, buildDigestHtml(freshAlerts))
-      if (sent) {
-        await Promise.allSettled(
-          freshAlerts.map((a) =>
-            env.ALERT_COOLDOWNS.put(`email:${email}:${a.tag}`, '1', {
-              expirationTtl: COOLDOWN_TTL,
-            })
-          )
-        )
-        console.log(`Email sent to ${email} (${freshAlerts.length} alerts)`)
-      }
-    })
-  )
-}
