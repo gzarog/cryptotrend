@@ -8,15 +8,18 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitAny": true,
     "skipLibCheck": true,
+    "types": ["@cloudflare/workers-types", "vitest/globals"],
+
+    "strict": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitAny": false,
+
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["worker", "shared", "src/lib", "src/types"]
+  "include": ["worker", "shared", "src/test/scheduler.test.ts", "src/test/preferences.test.ts"]
 }

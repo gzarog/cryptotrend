@@ -8,7 +8,7 @@ import {
 import type { TradingSignal } from '../types/signals'
 
 function makeSignal(source: string, direction: 'long' | 'short' | 'neutral' = 'long'): TradingSignal {
-  return { source, direction, confidence: 0.8, label: source }
+  return { source, direction, strength: 'moderate', confidence: 0.8, label: source }
 }
 
 describe('createInitialBayesianState', () => {

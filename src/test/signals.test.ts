@@ -132,7 +132,7 @@ describe('getQualifiedSignals', () => {
     const qualified = getQualifiedSignals(snapshots)
     expect(Array.isArray(qualified)).toBe(true)
     for (const q of qualified) {
-      expect(q.signal.direction).not.toBe('neutral')
+      expect(q.direction).not.toBe('neutral')
     }
   })
 })
